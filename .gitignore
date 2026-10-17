@@ -1,0 +1,17 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+
+# TPC-DS Data sets (Do NOT commit multi-gigabyte data files)
+data/
+*.dat
+*.csv
+
+# macOS system files
+.DS_Store
+
+# Temporary outputs
+/tmp/
