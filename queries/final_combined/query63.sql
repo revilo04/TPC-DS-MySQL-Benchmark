@@ -1,26 +1,56 @@
-select  * 
-from (select i_manager_id
-             ,sum(ss_sales_price) sum_sales
-             ,avg(sum(ss_sales_price)) over (partition by i_manager_id) avg_monthly_sales
-      from item
-          ,store_sales
-          ,date_dim
-          ,store
-      where ss_item_sk = i_item_sk
-        and ss_sold_date_sk = d_date_sk
-        and ss_store_sk = s_store_sk
-        and d_month_seq in (1176,1176+1,1176+2,1176+3,1176+4,1176+5,1176+6,1176+7,1176+8,1176+9,1176+10,1176+11)
-        and ((    i_category in ('Books','Children','Electronics')
-              and i_class in ('personal','portable','reference','self-help')
-              and i_brand in ('scholaramalgamalg #14','scholaramalgamalg #7',
-		                  'exportiunivamalg #9','scholaramalgamalg #9'))
-           or(    i_category in ('Women','Music','Men')
-              and i_class in ('accessories','classical','fragrances','pants')
-              and i_brand in ('amalgimporto #1','edu packscholar #1','exportiimporto #1',
-		                 'importoamalg #1')))
-group by i_manager_id, d_moy) tmp1
-where case when avg_monthly_sales > 0 then abs (sum_sales - avg_monthly_sales) / avg_monthly_sales else null end > 0.1
-order by i_manager_id
-        ,avg_monthly_sales
-        ,sum_sales
-limit 100;
+/*
+  Optimization procedure:
+  1. Apply the exact 12-month date window and complete item category/class/
+     brand disjunction in filtered CTEs.
+  2. Drive from eligible item keys into store_sales, then use sold-date and
+     store keys to retain only matching rows.
+  3. Preserve manager/month grouping, the manager-partitioned window average,
+     outer deviation predicate, ordering, and limit.
+
+  All three item attributes remain correlated within each original OR branch;
+  they are not converted into independent lists that would admit extra items.
+*/
+-- Law II: Restrict the date and item candidates before sales aggregation.
+WITH filtered_dates AS (
+    -- The source lists twelve consecutive month_seq values.
+    SELECT d_date_sk, d_moy
+    FROM date_dim
+    WHERE d_month_seq BETWEEN 1176 AND 1187
+),
+filtered_items AS (
+    -- Preserve the two complete item-predicate branches.
+    SELECT i_item_sk, i_manager_id
+    FROM item
+    WHERE (i_category IN ('Books', 'Children', 'Electronics')
+           AND i_class IN ('personal', 'portable', 'reference', 'self-help')
+           AND i_brand IN ('scholaramalgamalg #14', 'scholaramalgamalg #7',
+                           'exportiunivamalg #9', 'scholaramalgamalg #9'))
+       OR (i_category IN ('Women', 'Music', 'Men')
+           AND i_class IN ('accessories', 'classical', 'fragrances', 'pants')
+           AND i_brand IN ('amalgimporto #1', 'edu packscholar #1',
+                           'exportiimporto #1', 'importoamalg #1'))
+),
+monthly_sales AS (
+    -- Law III: Probe sales from the filtered item key set.
+    SELECT /*+ NO_MERGE(i) NO_MERGE(d) */
+           i.i_manager_id,
+           SUM(ss.ss_sales_price) AS sum_sales,
+           AVG(SUM(ss.ss_sales_price))
+               OVER (PARTITION BY i.i_manager_id) AS avg_monthly_sales
+    FROM filtered_items i
+    STRAIGHT_JOIN store_sales ss
+        ON ss.ss_item_sk = i.i_item_sk
+    STRAIGHT_JOIN filtered_dates d
+        ON d.d_date_sk = ss.ss_sold_date_sk
+    STRAIGHT_JOIN store s
+        ON s.s_store_sk = ss.ss_store_sk
+    -- Window input remains grouped at manager/month granularity.
+    GROUP BY i.i_manager_id, d.d_moy
+)
+SELECT *
+FROM monthly_sales tmp1
+WHERE CASE WHEN avg_monthly_sales > 0
+           THEN ABS(sum_sales - avg_monthly_sales) / avg_monthly_sales
+           ELSE NULL END > 0.1
+ORDER BY i_manager_id, avg_monthly_sales, sum_sales
+LIMIT 100;
