@@ -1,0 +1,27 @@
+# queries/our_opt/query21.sql, SF2, MySQL 8.4.13, 2026-10-26T11:55:45+01:00
+-> Limit: 100 row(s)  (cost=2.6..2.6 rows=0)
+    -> Sort: x.w_warehouse_name, x.i_item_id, limit input to 100 row(s) per chunk  (cost=2.6..2.6 rows=0)
+        -> Table scan on x  (cost=2.5..2.5 rows=0)
+            -> Materialize  (cost=0..0 rows=0)
+                -> Filter: ((case when (sum(t.inv_before) > 0) then (sum(t.inv_after) / sum(t.inv_before)) else NULL end) between <cache>((2.0 / 3.0)) and <cache>((3.0 / 2.0)))
+                    -> Table scan on <temporary>
+                        -> Aggregate using temporary table
+                            -> Nested loop inner join  (cost=137526 rows=0)
+                                -> Nested loop inner join  (cost=68764 rows=0)
+                                    -> Table scan on t  (cost=2.5..2.5 rows=0)
+                                        -> Materialize CTE inv_totals  (cost=0..0 rows=0)
+                                            -> Table scan on <temporary>
+                                                -> Aggregate using temporary table
+                                                    -> Nested loop inner join  (cost=1.13e+6 rows=275055)
+                                                        -> Nested loop inner join  (cost=258668 rows=2.48e+6)
+                                                            -> Table scan on d  (cost=8220..8323 rows=8051)
+                                                                -> Materialize CTE d_window  (cost=8220..8220 rows=8051)
+                                                                    -> Filter: (date_dim.d_date between <cache>((cast('2002-03-20' as date) - interval 30 day)) and <cache>((cast('2002-03-20' as date) + interval 30 day)))  (cost=7415 rows=8051)
+                                                                        -> Table scan on date_dim  (cost=7415 rows=72468)
+                                                            -> Index lookup on inv using PRIMARY (inv_date_sk=d.d_date_sk)  (cost=0.348 rows=308)
+                                                        -> Filter: (item.i_current_price between 0.99 and 1.49)  (cost=0.25 rows=0.111)
+                                                            -> Single-row index lookup on item using PRIMARY (i_item_sk=inv.inv_item_sk)  (cost=0.25 rows=1)
+                                    -> Single-row index lookup on w using PRIMARY (w_warehouse_sk=t.inv_warehouse_sk)  (cost=0.25 rows=1)
+                                -> Filter: (item.i_current_price between 0.99 and 1.49)  (cost=0.25 rows=0.111)
+                                    -> Single-row index lookup on item using PRIMARY (i_item_sk=t.inv_item_sk)  (cost=0.25 rows=1)
+

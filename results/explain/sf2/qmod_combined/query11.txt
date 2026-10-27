@@ -1,0 +1,40 @@
+# queries/qmod_combined/query11.sql, SF2, MySQL 8.4.13, 2026-10-26T11:55:45+01:00
+-> Limit: 100 row(s)
+    -> Sort: t_s_secyear.customer_id, t_s_secyear.customer_first_name, t_s_secyear.customer_last_name, t_s_secyear.customer_login, limit input to 100 row(s) per chunk
+        -> Stream results  (cost=3.03e+15 rows=750493)
+            -> Filter: ((case when (t_w_firstyear.year_total > 0.00) then (t_w_secyear.year_total / t_w_firstyear.year_total) else 0.0 end) > (case when (t_s_firstyear.year_total > 0.00) then (t_s_secyear.year_total / t_s_firstyear.year_total) else 0.0 end))  (cost=3.03e+15 rows=750493)
+                -> Inner hash join (t_w_secyear.customer_id = t_s_secyear.customer_id)  (cost=3.03e+15 rows=750493)
+                    -> Filter: ((t_w_secyear.dyear = <cache>((2001 + 1))) and (t_w_secyear.sale_type = 'w'))  (cost=0.449..3966 rows=8831)
+                        -> Table scan on t_w_secyear  (cost=2.5..2.5 rows=0)
+                            -> Materialize union CTE year_total if needed (query plan printed elsewhere)  (cost=0..0 rows=0)
+                    -> Hash
+                        -> Inner hash join (t_s_firstyear.customer_id = t_s_secyear.customer_id)  (cost=422e+9 rows=84986)
+                            -> Filter: ((t_s_firstyear.dyear = 2001) and (t_s_firstyear.sale_type = 's') and (t_s_firstyear.year_total > 0.00))  (cost=0.552..1625 rows=2943)
+                                -> Table scan on t_s_firstyear  (cost=2.5..2.5 rows=0)
+                                    -> Materialize union CTE year_total if needed  (cost=0..0 rows=0)
+                                        -> Table scan on <temporary>
+                                            -> Aggregate using temporary table
+                                                -> Nested loop inner join  (cost=5.09e+6 rows=7.25e+6)
+                                                    -> Nested loop inner join  (cost=2.55e+6 rows=7.25e+6)
+                                                        -> Table scan on customer  (cost=14650 rows=141771)
+                                                        -> Filter: (store_sales.ss_sold_date_sk is not null)  (cost=12.8 rows=51.2)
+                                                            -> Index lookup on store_sales using ss_c (ss_customer_sk=customer.c_customer_sk)  (cost=12.8 rows=51.2)
+                                                    -> Single-row index lookup on date_dim using PRIMARY (d_date_sk=store_sales.ss_sold_date_sk)  (cost=0.25 rows=1)
+                                        -> Table scan on <temporary>
+                                            -> Aggregate using temporary table
+                                                -> Nested loop inner join  (cost=1.27e+6 rows=1.58e+6)
+                                                    -> Nested loop inner join  (cost=717384 rows=1.58e+6)
+                                                        -> Filter: ((web_sales.ws_sold_date_sk is not null) and (web_sales.ws_bill_customer_sk is not null))  (cost=165355 rows=1.58e+6)
+                                                            -> Table scan on web_sales  (cost=165355 rows=1.58e+6)
+                                                        -> Single-row index lookup on date_dim using PRIMARY (d_date_sk=web_sales.ws_sold_date_sk)  (cost=0.25 rows=1)
+                                                    -> Single-row index lookup on customer using PRIMARY (c_customer_sk=web_sales.ws_bill_customer_sk)  (cost=0.25 rows=1)
+                            -> Hash
+                                -> Inner hash join (t_w_firstyear.customer_id = t_s_secyear.customer_id)  (cost=142e+6 rows=86631)
+                                    -> Filter: ((t_w_firstyear.dyear = 2001) and (t_w_firstyear.sale_type = 'w') and (t_w_firstyear.year_total > 0.00))  (cost=0.442..1300 rows=2943)
+                                        -> Table scan on t_w_firstyear  (cost=2.5..2.5 rows=0)
+                                            -> Materialize union CTE year_total if needed (query plan printed elsewhere)  (cost=0..0 rows=0)
+                                    -> Hash
+                                        -> Filter: ((t_s_secyear.dyear = <cache>((2001 + 1))) and (t_s_secyear.sale_type = 's'))  (cost=11.3..993470 rows=88308)
+                                            -> Table scan on t_s_secyear  (cost=2.5..2.5 rows=0)
+                                                -> Materialize union CTE year_total if needed (query plan printed elsewhere)  (cost=0..0 rows=0)
+

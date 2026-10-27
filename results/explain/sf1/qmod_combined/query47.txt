@@ -1,0 +1,33 @@
+# queries/qmod_combined/query47.sql, SF1, MySQL 8.4.13, 2026-10-26T11:55:44+01:00
+-> Limit: 100 row(s)
+    -> Sort: (v1.sum_sales - v1.avg_monthly_sales), psum, limit input to 100 row(s) per chunk
+        -> Stream results  (cost=402317 rows=968595)
+            -> Nested loop inner join  (cost=402317 rows=968595)
+                -> Nested loop inner join  (cost=63308 rows=93616)
+                    -> Filter: ((v1.d_year = 2001) and (v1.avg_monthly_sales > 0.000000) and ((case when (v1.avg_monthly_sales > 0.000000) then (abs((v1.sum_sales - v1.avg_monthly_sales)) / v1.avg_monthly_sales) else NULL end) > 0.1) and (v1.i_category is not null) and (v1.i_brand is not null) and (v1.s_store_name is not null) and (v1.s_company_name is not null))  (cost=3.38..30543 rows=9048)
+                        -> Table scan on v1  (cost=2.5..2.5 rows=0)
+                            -> Materialize CTE v1 if needed  (cost=0..0 rows=0)
+                                -> Window aggregate: rank() OVER (PARTITION BY item.i_category,item.i_brand,store.s_store_name,store.s_company_name ORDER BY date_dim.d_year,date_dim.d_moy ) 
+                                    -> Sort: item.i_category, item.i_brand, store.s_store_name, store.s_company_name, date_dim.d_year, date_dim.d_moy
+                                        -> Table scan on <temporary>  (cost=2.5..2.5 rows=0)
+                                            -> Temporary table  (cost=0..0 rows=0)
+                                                -> Window aggregate with buffering: avg(```sum(store_sales.ss_sales_price)```) OVER (PARTITION BY item.i_category,item.i_brand,store.s_store_name,store.s_company_name,date_dim.d_year ) 
+                                                    -> Sort: item.i_category, item.i_brand, store.s_store_name, store.s_company_name, date_dim.d_year
+                                                        -> Table scan on <temporary>
+                                                            -> Aggregate using temporary table
+                                                                -> Nested loop inner join  (cost=1.9e+6 rows=271471)
+                                                                    -> Nested loop inner join  (cost=1.05e+6 rows=2.3e+6)
+                                                                        -> Nested loop inner join  (cost=239850 rows=2.3e+6)
+                                                                            -> Table scan on item  (cost=1901 rows=17325)
+                                                                            -> Filter: ((store_sales.ss_store_sk is not null) and (store_sales.ss_sold_date_sk is not null))  (cost=0.446 rows=133)
+                                                                                -> Index lookup on store_sales using PRIMARY (ss_item_sk=item.i_item_sk)  (cost=0.446 rows=133)
+                                                                        -> Single-row index lookup on store using PRIMARY (s_store_sk=store_sales.ss_store_sk)  (cost=0.25 rows=1)
+                                                                    -> Filter: ((date_dim.d_year = 2001) or ((date_dim.d_moy = 12) and (date_dim.d_year = <cache>((2001 - 1)))) or ((date_dim.d_moy = 1) and (date_dim.d_year = <cache>((2001 + 1)))))  (cost=0.27 rows=0.118)
+                                                                        -> Single-row index lookup on date_dim using PRIMARY (d_date_sk=store_sales.ss_sold_date_sk)  (cost=0.27 rows=1)
+                    -> Filter: (v1.rn = (v1_lag.rn + 1))  (cost=0.25..2.59 rows=10.3)
+                        -> Index lookup on v1_lag using <auto_key0> (i_category=v1.i_category, i_brand=v1.i_brand, s_store_name=v1.s_store_name, s_company_name=v1.s_company_name)  (cost=0.25..2.59 rows=10.3)
+                            -> Materialize CTE v1 if needed (query plan printed elsewhere)  (cost=0..0 rows=0)
+                -> Filter: (v1.rn = (v1_lead.rn - 1))  (cost=0.25..2.59 rows=10.3)
+                    -> Index lookup on v1_lead using <auto_key0> (i_category=v1.i_category, i_brand=v1.i_brand, s_store_name=v1.s_store_name, s_company_name=v1.s_company_name)  (cost=0.25..2.59 rows=10.3)
+                        -> Materialize CTE v1 if needed (query plan printed elsewhere)  (cost=0..0 rows=0)
+

@@ -1,0 +1,47 @@
+{
+  "started_at": "2026-10-26T11:18:16+01:00",
+  "settings": {
+    "scale_factor": 1,
+    "warmup": true,
+    "timeout_seconds": 900.0,
+    "monitor_resource_utils": false
+  },
+  "query_directory": "queries/qmod_combined",
+  "query_sha256": {
+    "4": "d937657020473726",
+    "11": "4bafbda90bdb71fb",
+    "21": "ba1071a04fbefb20",
+    "47": "8818d27e0f674078",
+    "50": "af1fdb63faa32545",
+    "74": "e08743b23302c30c",
+    "81": "4424dff05be7c86e"
+  },
+  "git": {
+    "commit": "634aab51f307dab491d71774628265e3dbb79b09",
+    "dirty": true
+  },
+  "mysql": {
+    "version": "8.4.13",
+    "innodb_buffer_pool_size": 6442450944,
+    "innodb_buffer_pool_instances": 2,
+    "innodb_flush_method": "fsync",
+    "innodb_flush_log_at_trx_commit": 1,
+    "join_buffer_size": 262144,
+    "sort_buffer_size": 262144,
+    "tmp_table_size": 16777216,
+    "max_heap_table_size": 16777216,
+    "optimizer_switch": "index_merge=on,index_merge_union=on,index_merge_sort_union=on,index_merge_intersection=on,engine_condition_pushdown=on,index_condition_pushdown=on,mrr=on,mrr_cost_based=on,block_nested_loop=on,batched_key_access=off,materialization=on,semijoin=on,loosescan=on,firstmatch=on,duplicateweedout=on,subquery_materialization_cost_based=on,use_index_extensions=on,condition_fanout_filter=on,derived_merge=on,use_invisible_indexes=off,skip_scan=on,hash_join=on,subquery_to_derived=off,prefer_ordering_index=on,hypergraph_optimizer=off,derived_condition_pushdown=on,hash_set_operations=on",
+    "uptime_seconds": 419443
+  },
+  "python": "3.14.4",
+  "mysql_connector": "26.7.0",
+  "machine": {
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "cpu": "Apple M4",
+    "logical_cpus": 10,
+    "memory_bytes": 25769803776
+  },
+  "total_time_seconds": 113.4653804997215,
+  "failures": {},
+  "finished_at": "2026-10-26T11:21:58+01:00"
+}

@@ -1,0 +1,44 @@
+# queries/our_opt/query4.sql, SF1, MySQL 8.4.13, 2026-10-26T11:55:44+01:00
+-> Limit: 100 row(s)
+    -> Sort: c.c_customer_id, c.c_first_name, c.c_last_name, c.c_login, limit input to 100 row(s) per chunk
+        -> Stream results  (cost=739e+6 rows=1.5e+9)
+            -> Nested loop inner join  (cost=739e+6 rows=1.5e+9)
+                -> Nested loop inner join  (cost=580e+6 rows=1.5e+9)
+                    -> Nested loop inner join  (cost=54.3e+6 rows=150e+6)
+                        -> Filter: (s.customer_sk is not null)  (cost=0.113..1.69e+6 rows=15e+6)
+                            -> Table scan on s  (cost=2.5..2.5 rows=0)
+                                -> Materialize CTE s_totals  (cost=0..0 rows=0)
+                                    -> Filter: ((count((case when (d.d_year = 2001) then 1 end)) > 0) and (count((case when (d.d_year = 2002) then 1 end)) > 0) and (sum((case when (d.d_year = 2001) then ((((ss.ss_ext_list_price - ss.ss_ext_wholesale_cost) - ss.ss_ext_discount_amt) + ss.ss_ext_sales_price) / 2) end)) > 0))
+                                        -> Table scan on <temporary>
+                                            -> Aggregate using temporary table
+                                                -> Nested loop inner join  (cost=11.8e+6 rows=15e+6)
+                                                    -> Table scan on d  (cost=8878..9062 rows=14494)
+                                                        -> Materialize CTE d_2001_2002 if needed  (cost=8878..8878 rows=14494)
+                                                            -> Filter: (date_dim.d_year in (2001,2002))  (cost=7429 rows=14494)
+                                                                -> Table scan on date_dim  (cost=7429 rows=72468)
+                                                    -> Filter: (ss.ss_customer_sk is not null)  (cost=607 rows=1037)
+                                                        -> Index lookup on ss using ss_d (ss_sold_date_sk=d.d_date_sk)  (cost=607 rows=2074)
+                        -> Filter: ((case when (ct.first_total > 0.000000) then (ct.sec_total / ct.first_total) else NULL end) > (case when (s.first_total > 0.000000) then (s.sec_total / s.first_total) else NULL end))  (cost=0.25..2.5 rows=10)
+                            -> Index lookup on ct using <auto_key0> (customer_sk=s.customer_sk)  (cost=0.25..2.5 rows=10)
+                                -> Materialize CTE c_totals  (cost=0..0 rows=0)
+                                    -> Filter: ((count((case when (d.d_year = 2001) then 1 end)) > 0) and (count((case when (d.d_year = 2002) then 1 end)) > 0) and (sum((case when (d.d_year = 2001) then ((((cs.cs_ext_list_price - cs.cs_ext_wholesale_cost) - cs.cs_ext_discount_amt) + cs.cs_ext_sales_price) / 2) end)) > 0))
+                                        -> Table scan on <temporary>
+                                            -> Aggregate using temporary table
+                                                -> Nested loop inner join  (cost=9.5e+6 rows=6.94e+6)
+                                                    -> Table scan on d  (cost=8878..9062 rows=14494)
+                                                        -> Materialize CTE d_2001_2002 if needed (query plan printed elsewhere)  (cost=8878..8878 rows=14494)
+                                                    -> Filter: (cs.cs_bill_customer_sk is not null)  (cost=559 rows=479)
+                                                        -> Index lookup on cs using cs_d2 (cs_sold_date_sk=d.d_date_sk)  (cost=559 rows=958)
+                    -> Filter: ((case when (ct.first_total > 0.000000) then (ct.sec_total / ct.first_total) else NULL end) > (case when (w.first_total > 0.000000) then (w.sec_total / w.first_total) else NULL end))  (cost=0.25..2.5 rows=10)
+                        -> Index lookup on w using <auto_key0> (customer_sk=s.customer_sk)  (cost=0.25..2.5 rows=10)
+                            -> Materialize CTE w_totals  (cost=0..0 rows=0)
+                                -> Filter: ((count((case when (d.d_year = 2001) then 1 end)) > 0) and (count((case when (d.d_year = 2002) then 1 end)) > 0) and (sum((case when (d.d_year = 2001) then ((((ws.ws_ext_list_price - ws.ws_ext_wholesale_cost) - ws.ws_ext_discount_amt) + ws.ws_ext_sales_price) / 2) end)) > 0))
+                                    -> Table scan on <temporary>
+                                        -> Aggregate using temporary table
+                                            -> Nested loop inner join  (cost=2.34e+6 rows=3.34e+6)
+                                                -> Table scan on d  (cost=8878..9062 rows=14494)
+                                                    -> Materialize CTE d_2001_2002 if needed (query plan printed elsewhere)  (cost=8878..8878 rows=14494)
+                                                -> Filter: (ws.ws_bill_customer_sk is not null)  (cost=115 rows=230)
+                                                    -> Index lookup on ws using ws_d2 (ws_sold_date_sk=d.d_date_sk)  (cost=115 rows=460)
+                -> Single-row index lookup on c using PRIMARY (c_customer_sk=s.customer_sk)  (cost=0.00562 rows=1)
+

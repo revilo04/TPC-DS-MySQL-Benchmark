@@ -1,0 +1,17 @@
+# queries/qmod_combined/query50.sql, SF2, MySQL 8.4.13, 2026-10-26T11:55:45+01:00
+-> Limit: 100 row(s)
+    -> Sort: store.s_store_name, store.s_company_id, store.s_street_number, store.s_street_name, store.s_street_type, store.s_suite_number, store.s_city, store.s_county, store.s_state, store.s_zip, limit input to 100 row(s) per chunk
+        -> Table scan on <temporary>
+            -> Aggregate using temporary table
+                -> Nested loop inner join  (cost=158215 rows=10257)
+                    -> Nested loop inner join  (cost=154625 rows=10257)
+                        -> Nested loop inner join  (cost=151035 rows=10257)
+                            -> Nested loop inner join  (cost=79216 rows=205146)
+                                -> Filter: ((d2.d_moy = 8) and (d2.d_year = 2001))  (cost=7415 rows=725)
+                                    -> Table scan on d2  (cost=7415 rows=72468)
+                                -> Index lookup on store_returns using sr_ret_d (sr_returned_date_sk=d2.d_date_sk)  (cost=70.8 rows=283)
+                            -> Filter: ((store_sales.ss_customer_sk = store_returns.sr_customer_sk) and (store_sales.ss_store_sk is not null) and (store_sales.ss_sold_date_sk is not null))  (cost=0.25 rows=0.05)
+                                -> Single-row index lookup on store_sales using PRIMARY (ss_item_sk=store_returns.sr_item_sk, ss_ticket_number=store_returns.sr_ticket_number)  (cost=0.25 rows=1)
+                        -> Single-row index lookup on store using PRIMARY (s_store_sk=store_sales.ss_store_sk)  (cost=0.25 rows=1)
+                    -> Single-row covering index lookup on d1 using PRIMARY (d_date_sk=store_sales.ss_sold_date_sk)  (cost=0.25 rows=1)
+

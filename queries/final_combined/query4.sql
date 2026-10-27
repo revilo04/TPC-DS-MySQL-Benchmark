@@ -1,70 +1,73 @@
-WITH STORE_YEAR_TOTAL AS (
-    SELECT
-        C_CUSTOMER_ID CUSTOMER_ID,
-        C_FIRST_NAME CUSTOMER_FIRST_NAME,
-        C_LAST_NAME CUSTOMER_LAST_NAME,
-        C_PREFERRED_CUST_FLAG CUSTOMER_PREFERRED_CUST_FLAG,
-        C_BIRTH_COUNTRY CUSTOMER_BIRTH_COUNTRY,
-        C_LOGIN CUSTOMER_LOGIN,
-        C_EMAIL_ADDRESS CUSTOMER_EMAIL_ADDRESS,
-        D_YEAR DYEAR,
-        SUM((SS_EXT_LIST_PRICE - SS_EXT_WHOLESALE_COST - SS_EXT_DISCOUNT_AMT + SS_EXT_SALES_PRICE) / 2) YEAR_TOTAL
-    FROM CUSTOMER
-    JOIN STORE_SALES ON C_CUSTOMER_SK = SS_CUSTOMER_SK
-    JOIN DATE_DIM ON SS_SOLD_DATE_SK = D_DATE_SK AND D_YEAR IN (2001, 2002)
-    GROUP BY C_CUSTOMER_ID, C_FIRST_NAME, C_LAST_NAME, C_PREFERRED_CUST_FLAG, C_BIRTH_COUNTRY, C_LOGIN, C_EMAIL_ADDRESS, D_YEAR
+WITH d_2001_2002 AS (
+    SELECT /*+ NO_MERGE() */ d_date_sk, d_year
+    FROM date_dim
+    WHERE d_year IN (2001, 2002)
 ),
-
-CATALOG_YEAR_TOTAL AS (
-    SELECT
-        C_CUSTOMER_ID CUSTOMER_ID,
-        C_FIRST_NAME CUSTOMER_FIRST_NAME,
-        C_LAST_NAME CUSTOMER_LAST_NAME,
-        C_PREFERRED_CUST_FLAG CUSTOMER_PREFERRED_CUST_FLAG,
-        C_BIRTH_COUNTRY CUSTOMER_BIRTH_COUNTRY,
-        C_LOGIN CUSTOMER_LOGIN,
-        C_EMAIL_ADDRESS CUSTOMER_EMAIL_ADDRESS,
-        D_YEAR DYEAR,
-        SUM((CS_EXT_LIST_PRICE - CS_EXT_WHOLESALE_COST - CS_EXT_DISCOUNT_AMT + CS_EXT_SALES_PRICE) / 2) YEAR_TOTAL
-    FROM CUSTOMER
-    JOIN CATALOG_SALES ON C_CUSTOMER_SK = CS_BILL_CUSTOMER_SK
-    JOIN DATE_DIM ON CS_SOLD_DATE_SK = D_DATE_SK AND D_YEAR IN (2001, 2002)
-    GROUP BY C_CUSTOMER_ID, C_FIRST_NAME, C_LAST_NAME, C_PREFERRED_CUST_FLAG, C_BIRTH_COUNTRY, C_LOGIN, C_EMAIL_ADDRESS, D_YEAR
+-- One pass per channel, grouped by the integer customer key (c_customer_id is unique per
+-- c_customer_sk). SUM(... END) keeps NULL for all-NULL years and the counts keep the
+-- existence semantics of the original per-year self-joins.
+s_totals AS (
+    SELECT /*+ NO_MERGE() */
+           ss.ss_customer_sk AS customer_sk,
+           SUM(CASE WHEN d.d_year = 2001 THEN ((ss.ss_ext_list_price - ss.ss_ext_wholesale_cost - ss.ss_ext_discount_amt) + ss.ss_ext_sales_price) / 2 END) AS first_total,
+           SUM(CASE WHEN d.d_year = 2002 THEN ((ss.ss_ext_list_price - ss.ss_ext_wholesale_cost - ss.ss_ext_discount_amt) + ss.ss_ext_sales_price) / 2 END) AS sec_total,
+           COUNT(CASE WHEN d.d_year = 2001 THEN 1 END) AS first_rows,
+           COUNT(CASE WHEN d.d_year = 2002 THEN 1 END) AS sec_rows
+    FROM d_2001_2002 d
+    STRAIGHT_JOIN store_sales ss
+      ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE ss.ss_customer_sk IS NOT NULL
+    GROUP BY ss.ss_customer_sk
 ),
-
-WEB_YEAR_TOTAL AS (
-    SELECT
-        C_CUSTOMER_ID CUSTOMER_ID,
-        C_FIRST_NAME CUSTOMER_FIRST_NAME,
-        C_LAST_NAME CUSTOMER_LAST_NAME,
-        C_PREFERRED_CUST_FLAG CUSTOMER_PREFERRED_CUST_FLAG,
-        C_BIRTH_COUNTRY CUSTOMER_BIRTH_COUNTRY,
-        C_LOGIN CUSTOMER_LOGIN,
-        C_EMAIL_ADDRESS CUSTOMER_EMAIL_ADDRESS,
-        D_YEAR DYEAR,
-        SUM((WS_EXT_LIST_PRICE - WS_EXT_WHOLESALE_COST - WS_EXT_DISCOUNT_AMT + WS_EXT_SALES_PRICE) / 2) YEAR_TOTAL
-    FROM CUSTOMER
-    JOIN WEB_SALES ON C_CUSTOMER_SK = WS_BILL_CUSTOMER_SK
-    JOIN DATE_DIM ON WS_SOLD_DATE_SK = D_DATE_SK AND D_YEAR IN (2001, 2002)
-    GROUP BY C_CUSTOMER_ID, C_FIRST_NAME, C_LAST_NAME, C_PREFERRED_CUST_FLAG, C_BIRTH_COUNTRY, C_LOGIN, C_EMAIL_ADDRESS, D_YEAR
+c_totals AS (
+    SELECT /*+ NO_MERGE() */
+           cs.cs_bill_customer_sk AS customer_sk,
+           SUM(CASE WHEN d.d_year = 2001 THEN ((cs.cs_ext_list_price - cs.cs_ext_wholesale_cost - cs.cs_ext_discount_amt) + cs.cs_ext_sales_price) / 2 END) AS first_total,
+           SUM(CASE WHEN d.d_year = 2002 THEN ((cs.cs_ext_list_price - cs.cs_ext_wholesale_cost - cs.cs_ext_discount_amt) + cs.cs_ext_sales_price) / 2 END) AS sec_total,
+           COUNT(CASE WHEN d.d_year = 2001 THEN 1 END) AS first_rows,
+           COUNT(CASE WHEN d.d_year = 2002 THEN 1 END) AS sec_rows
+    FROM d_2001_2002 d
+    STRAIGHT_JOIN catalog_sales cs
+      ON cs.cs_sold_date_sk = d.d_date_sk
+    WHERE cs.cs_bill_customer_sk IS NOT NULL
+    GROUP BY cs.cs_bill_customer_sk
+),
+w_totals AS (
+    SELECT /*+ NO_MERGE() */
+           ws.ws_bill_customer_sk AS customer_sk,
+           SUM(CASE WHEN d.d_year = 2001 THEN ((ws.ws_ext_list_price - ws.ws_ext_wholesale_cost - ws.ws_ext_discount_amt) + ws.ws_ext_sales_price) / 2 END) AS first_total,
+           SUM(CASE WHEN d.d_year = 2002 THEN ((ws.ws_ext_list_price - ws.ws_ext_wholesale_cost - ws.ws_ext_discount_amt) + ws.ws_ext_sales_price) / 2 END) AS sec_total,
+           COUNT(CASE WHEN d.d_year = 2001 THEN 1 END) AS first_rows,
+           COUNT(CASE WHEN d.d_year = 2002 THEN 1 END) AS sec_rows
+    FROM d_2001_2002 d
+    STRAIGHT_JOIN web_sales ws
+      ON ws.ws_sold_date_sk = d.d_date_sk
+    WHERE ws.ws_bill_customer_sk IS NOT NULL
+    GROUP BY ws.ws_bill_customer_sk
 )
-
-SELECT
-    S.CUSTOMER_ID,
-    S.CUSTOMER_FIRST_NAME,
-    S.CUSTOMER_LAST_NAME,
-    S.CUSTOMER_BIRTH_COUNTRY
-FROM STORE_YEAR_TOTAL S
-JOIN CATALOG_YEAR_TOTAL C ON S.CUSTOMER_ID = C.CUSTOMER_ID
-JOIN WEB_YEAR_TOTAL W ON S.CUSTOMER_ID = W.CUSTOMER_ID
-WHERE
-    S.DYEAR = 2001 AND C.DYEAR = 2001 AND W.DYEAR = 2001
-    AND S.YEAR_TOTAL > 0 AND C.YEAR_TOTAL > 0 AND W.YEAR_TOTAL > 0
-    AND CASE WHEN C.YEAR_TOTAL > 0 THEN C.YEAR_TOTAL ELSE NULL END > CASE WHEN S.YEAR_TOTAL > 0 THEN S.YEAR_TOTAL ELSE NULL END
-    AND CASE WHEN C.YEAR_TOTAL > 0 THEN C.YEAR_TOTAL ELSE NULL END > CASE WHEN W.YEAR_TOTAL > 0 THEN W.YEAR_TOTAL ELSE NULL END
-ORDER BY
-    S.CUSTOMER_ID,
-    S.CUSTOMER_FIRST_NAME,
-    S.CUSTOMER_LAST_NAME,
-    S.CUSTOMER_BIRTH_COUNTRY
+SELECT c.c_customer_id AS customer_id,
+       c.c_first_name AS customer_first_name,
+       c.c_last_name AS customer_last_name,
+       c.c_login AS customer_login
+FROM s_totals s
+STRAIGHT_JOIN c_totals ct
+  ON ct.customer_sk = s.customer_sk
+STRAIGHT_JOIN w_totals w
+  ON w.customer_sk = s.customer_sk
+STRAIGHT_JOIN customer c
+  ON c.c_customer_sk = s.customer_sk
+WHERE s.first_rows > 0 AND s.sec_rows > 0
+  AND ct.first_rows > 0 AND ct.sec_rows > 0
+  AND w.first_rows > 0 AND w.sec_rows > 0
+  AND s.first_total > 0
+  AND ct.first_total > 0
+  AND w.first_total > 0
+  AND CASE WHEN ct.first_total > 0 THEN ct.sec_total / ct.first_total ELSE NULL END
+    > CASE WHEN s.first_total > 0 THEN s.sec_total / s.first_total ELSE NULL END
+  AND CASE WHEN ct.first_total > 0 THEN ct.sec_total / ct.first_total ELSE NULL END
+    > CASE WHEN w.first_total > 0 THEN w.sec_total / w.first_total ELSE NULL END
+ORDER BY c.c_customer_id,
+         c.c_first_name,
+         c.c_last_name,
+         c.c_login
 LIMIT 100;

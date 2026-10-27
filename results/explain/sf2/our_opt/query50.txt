@@ -1,0 +1,24 @@
+# queries/our_opt/query50.sql, SF2, MySQL 8.4.13, 2026-10-26T11:55:45+01:00
+-> Limit: 100 row(s)
+    -> Sort: s.s_store_name, s.s_company_id, s.s_street_number, s.s_street_name, s.s_street_type, s.s_suite_number, s.s_city, s.s_county, s.s_state, s.s_zip, limit input to 100 row(s) per chunk
+        -> Table scan on <temporary>
+            -> Aggregate using temporary table
+                -> Nested loop inner join  (cost=4742 rows=10247)
+                    -> Filter: (r.ss_store_sk is not null)  (cost=0.113..1155 rows=10247)
+                        -> Table scan on r  (cost=2.5..2.5 rows=0)
+                            -> Materialize CTE returns_by_store  (cost=0..0 rows=0)
+                                -> Table scan on <temporary>
+                                    -> Aggregate using temporary table
+                                        -> Nested loop inner join  (cost=154610 rows=10257)
+                                            -> Nested loop inner join  (cost=151023 rows=10257)
+                                                -> Nested loop inner join  (cost=79252 rows=205146)
+                                                    -> Table scan on d2  (cost=7488..7499 rows=725)
+                                                        -> Materialize CTE d_aug_2001  (cost=7488..7488 rows=725)
+                                                            -> Filter: ((date_dim.d_moy = 8) and (date_dim.d_year = 2001))  (cost=7415 rows=725)
+                                                                -> Table scan on date_dim  (cost=7415 rows=72468)
+                                                    -> Index lookup on sr using sr_ret_d (sr_returned_date_sk=d2.d_date_sk)  (cost=70.8 rows=283)
+                                                -> Filter: ((ss.ss_customer_sk = sr.sr_customer_sk) and (ss.ss_sold_date_sk is not null))  (cost=0.25 rows=0.05)
+                                                    -> Single-row index lookup on ss using PRIMARY (ss_item_sk=sr.sr_item_sk, ss_ticket_number=sr.sr_ticket_number)  (cost=0.25 rows=1)
+                                            -> Single-row covering index lookup on d1 using PRIMARY (d_date_sk=ss.ss_sold_date_sk)  (cost=0.25 rows=1)
+                    -> Single-row index lookup on s using PRIMARY (s_store_sk=r.ss_store_sk)  (cost=0.25 rows=1)
+

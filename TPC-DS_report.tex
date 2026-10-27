@@ -12,8 +12,8 @@
 \titleULB{
 	title={Assignment 1},
 	studies={2026 - 2027},
-	course={INFO-H420 - Management of Data Science and Business Workflows},
-	author={Oliver Irvine\\ \\ \\ },
+	course={INFO-H419 - Data Warehouses},
+	author={Oliver Irvine\\ Jianli Zhao\\ Sager Singh\\ Neha},
 	date={November 2026},
 	teacher={Esteban Zimányi},
 	logo={Pictures/logo-polytech.jpg},
@@ -46,7 +46,7 @@ Standard relational query optimisers routinely push conjunctive selection predic
 \begin{equation}
 \sigma_{\bigvee_{i=1}^{k} \left(\theta_{\text{join}} \,\land\, p_i(R) \,\land\, q_i(S)\right)}(R \times S)
 \end{equation}
-By the distributive law of conjunction over disjunction, common equijoin predicates $\theta_{\text{join}}$ can be factored out of the disjunction. More importantly, each relation's disjunctive domain forms a superset ``bounding box'' filter $\P_R = \bigvee_{i=1}^{k} p_i(R)$ and $Q_S = \bigvee_{i=1}^{k} q_i(S)$ that must hold for any tuple to survive the overall disjunction:
+By the distributive law of conjunction over disjunction, common equijoin predicates $\theta_{\text{join}}$ can be factored out of the disjunction. More importantly, each relation's disjunctive domain forms a superset ``bounding box'' filter $P_R = \bigvee_{i=1}^{k} p_i(R)$ and $Q_S = \bigvee_{i=1}^{k} q_i(S)$ that must hold for any tuple to survive the overall disjunction:
 \begin{equation}
 \sigma_{\bigvee_{i=1}^{k} \left(\theta_{\text{join}} \,\land\, p_i(R) \,\land\, q_i(S)\right)}(R \times S) \;\equiv\; \sigma_{\bigvee_{i=1}^{k} \left(p_i(R) \,\land\, q_i(S)\right)}\left( \sigma_{\bigvee_{i=1}^{k} p_i(R)}(R) \;\bowtie_{\theta_{\text{join}}}\; \sigma_{\bigvee_{i=1}^{k} q_i(S)}(S) \right)
 \end{equation}
@@ -67,14 +67,18 @@ Two physical mechanics in MySQL 8.0 InnoDB govern how join trees scale from SF1 
     \item \textbf{Driving into InnoDB Clustered Composite Primary Keys and Foreign Key B-Trees:} In InnoDB, every table is physically clustered around its \texttt{PRIMARY KEY}, and every foreign key constraint creates a secondary B-Tree index. In TPC-DS, fact tables have composite primary keys such as \texttt{inventory(inv\_date\_sk, inv\_item\_sk, inv\_warehouse\_sk)} or \texttt{store\_sales(ss\_item\_sk, ss\_ticket\_number)}, as well as foreign key indexes on date surrogate keys (e.g., \texttt{cs\_sold\_date\_sk}, \texttt{ss\_sold\_date\_sk}). By combining materialised selective dimension CTEs with \texttt{STRAIGHT\_JOIN}, we force MySQL to drive the execution plan from the small filtered dimension CTE directly into the fact table's Foreign Key index or left-prefix Composite Primary Key, converting 94-million-row full table scans into $O(\log N)$ B-Tree point lookups.
 \end{enumerate}
 
----
-
 \section{Group A: Early Surrogate-Key Aggregation Before Dimension and Self-Joins (Law I + Law III)}
 
-Queries in Group A join large fact tables (\texttt{store\_sales}, \texttt{catalog\_sales}, \texttt{web\_sales}, \texttt{catalog\_returns}, \texttt{inventory}) to wide string-heavy dimension tables (\texttt{customer}, \texttt{item}, \texttt{store}, \texttt{warehouse}) prior to aggregation, or self-join unpushed multi-year CTEs on string natural keys. By applying **Law I** (grouping fact tables by 4-byte integer surrogate keys before joining dimensions) and **Law III** (driving from materialised \texttt{date\_dim} CTEs via \texttt{STRAIGHT\_JOIN}), we eliminate wide string temporary table spills and redundant self-joins.
+Queries in Group A (Q4, Q11, Q21, Q47, Q50, Q74, Q81) aggregate large fact tables (\texttt{store\_sales}, \texttt{catalog\_sales}, \texttt{web\_sales}, \texttt{catalog\_returns}, \texttt{inventory}) by string-valued dimension attributes (\texttt{customer}, \texttt{item}, \texttt{store}, \texttt{warehouse}), or self-join multi-year CTEs on string natural keys. By applying \textbf{Law I} (grouping fact rows by integer surrogate keys before joining dimensions) and \textbf{Law III} (driving from small, materialised \texttt{date\_dim} CTEs into fact-table indexes via \texttt{STRAIGHT\_JOIN}), we remove wide-string temporary tables, redundant self-joins and statistics-dependent plan choices.
+
+\paragraph{Refinement of Law I.} Pushing the aggregation below the dimension join is only lossless when the outer grouping attributes are functionally determined by the surrogate key \emph{and} the query still groups by those attributes afterwards. In the TPC-DS data this cannot be taken for granted: \texttt{c\_customer\_id} is unique per \texttt{c\_customer\_sk}, but \texttt{item}, \texttt{store} and \texttt{warehouse} are slowly changing dimensions. At SF1, 18,000 item keys map to only 9,000 values of \texttt{i\_item\_id}, 12 stores share 8 store names and 5 warehouses share 4 names. Whenever a query groups by such attributes, our rewrites therefore aggregate by surrogate keys first and then \emph{re-aggregate} by the original attributes after the dimension join. This is exact for distributive aggregates: $\text{SUM}(\text{SUM}(x))$ equals $\text{SUM}(x)$, including returning \texttt{NULL} only when all inputs are \texttt{NULL}.
+
+\paragraph{Corrected baseline for Q4 and Q11.} The inherited \texttt{qmod\_combined} versions of Q4 and Q11 did not preserve the original queries: Q4 compared absolute 2001 totals instead of the 2001$\rightarrow$2002 growth ratios of the three channels, and both returned \texttt{customer\_birth\_country} instead of \texttt{customer\_login}. On SF1 the inherited Q4 returns 245 rows, whereas the original returns 8. We replaced both with the MySQL-compatible original queries (which differ from \texttt{orig} only in whitespace); the historical Q4 and Q11 timings refer to the incorrect queries and are not used here.
+
+\paragraph{Experimental setup and correctness.} All Group A measurements were taken on one machine (Apple M4, 10 cores, 24\,GiB RAM, MySQL 8.4.13, 6\,GiB InnoDB buffer pool) on SF1 (4.34\,GB including indexes) and SF2 (7.59\,GB, larger than the buffer pool). Each query was executed once as a warm-up and then timed; we report the median of three such runs, including the time to fetch all rows. Correctness was verified by executing the baseline and the optimised query with the trailing \texttt{LIMIT} removed and comparing the complete result sets (exact comparison of decimals and strings, relative tolerance $10^{-9}$ for floating-point aggregates). All seven queries return identical results, in the same order, on SF1 and SF2.
 
 \subsection{Group A Performance Summary}
-Table~\ref{tab:group_a_results} reports the speedup factors achieved over the baseline across all four scale factors for Group A queries.
+Table~\ref{tab:group_a_results} reports the speedup of each optimised query over the baseline and Table~\ref{tab:group_a_times} the underlying execution times. Measurements on SF4 and SF8 are pending.
 
 \begin{table}[htbp]
 \centering
@@ -83,94 +87,163 @@ Table~\ref{tab:group_a_results} reports the speedup factors achieved over the ba
 \begin{tabular}{@{}lrrrrr@{}}
 \toprule
 \textbf{Query} & \textbf{SF1 ($\times$)} & \textbf{SF2 ($\times$)} & \textbf{SF4 ($\times$)} & \textbf{SF8 ($\times$)} & \textbf{Total ($\times$)} \\ \midrule
-Query 4  & -- & -- & -- & -- & -- \\
-Query 11 & -- & -- & -- & -- & -- \\
-Query 21 & -- & -- & -- & -- & -- \\
-Query 47 & -- & -- & -- & -- & -- \\
-Query 50 & -- & -- & -- & -- & -- \\
-Query 74 & -- & -- & -- & -- & -- \\
-Query 81 & -- & -- & -- & -- & -- \\ \midrule
-\textbf{Group A Total / Average} & \textbf{--} & \textbf{--} & \textbf{--} & \textbf{--} & \textbf{--} \\ \bottomrule
+Query 4  & 16.7 & 19.3 & -- & -- & -- \\
+Query 11 & 16.7 & 17.3 & -- & -- & -- \\
+Query 21 & 2.4 & 133.1 & -- & -- & -- \\
+Query 47 & 5.0 & 5.9 & -- & -- & -- \\
+Query 50 & 1.4 & 1.6 & -- & -- & -- \\
+Query 74 & 5.8 & 6.5 & -- & -- & -- \\
+Query 81 & 20.3 & 40.0 & -- & -- & -- \\ \midrule
+\textbf{Group A Total} & \textbf{11.7} & \textbf{14.9} & \textbf{--} & \textbf{--} & \textbf{--} \\ \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Group A Highlight: Query XX Optimization}
+\begin{table}[htbp]
+\centering
+\caption{Group A Execution Times in Seconds (Median of Three Warm Runs)}
+\label{tab:group_a_times}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Query} & \textbf{SF1 Baseline} & \textbf{SF1 Optimised} & \textbf{SF2 Baseline} & \textbf{SF2 Optimised} \\ \midrule
+Query 4  & 50.954 & 3.053 & 112.460 & 5.821 \\
+Query 11 & 35.522 & 2.128 & 71.957 & 4.150 \\
+Query 21 & 0.337 & 0.142 & 25.189 & 0.189 \\
+Query 47 & 9.365 & 1.884 & 18.915 & 3.219 \\
+Query 50 & 0.032 & 0.023 & 0.050 & 0.032 \\
+Query 74 & 11.797 & 2.048 & 25.602 & 3.923 \\
+Query 81 & 1.981 & 0.098 & 7.012 & 0.175 \\ \midrule
+\textbf{Total} & \textbf{110.0} & \textbf{9.4} & \textbf{261.2} & \textbf{17.5} \\ \bottomrule
+\end{tabular}
+\end{table}
+
+From SF1 to SF2 the summed baseline runtime grows by $2.37\times$, whereas the optimised queries grow by $1.86\times$. The group totals are dominated by Q4 and Q11, while the largest single improvement is Q21, discussed next.
+
+\subsection{Group A Highlight: Query 21 Optimization}
 
 \subsubsection{Baseline Execution Plan and Bottleneck Analysis}
-In the baseline workload (\texttt{qmod\_combined/queryXX.sql}), Query XX required s at SF1 and degraded to s at SF8. The baseline query ... .
+Query 21 compares, per warehouse and item, the inventory on hand in the 30 days before and after 2002-03-20 for items priced between 0.99 and 1.49. In the baseline (\texttt{qmod\_combined/query21.sql}) it takes only 0.34\,s on SF1 but 25.19\,s on SF2: a $74.7\times$ slowdown for twice the data. The historical results of the full workload show the same jump (0.30\,s on SF1, 53.31\,s on SF2). The cause is a plan flip between the two scale factors.
 
-Listing~\ref{lst:qXX_explain_orig} shows the baseline \texttt{EXPLAIN FORMAT=TREE} on SF8.
+On SF1 (Listing~\ref{lst:q21_explain_sf1}) MySQL drives from the 61 qualifying \texttt{date\_dim} rows into the left prefix \texttt{inv\_date\_sk} of the \texttt{inventory} primary key \texttt{(inv\_date\_sk, inv\_item\_sk, inv\_warehouse\_sk)}, so only the weekly inventory snapshots inside the window are read.
 
-\begin{lstlisting}[caption={Baseline \texttt{EXPLAIN FORMAT=TREE} on SF8 for Query 11}, label={lst:q11_explain_orig}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
-% TODO: Paste Baseline Query XX EXPLAIN FORMAT=TREE output on SF8 here
+\begin{lstlisting}[caption={Baseline \texttt{EXPLAIN FORMAT=TREE} on SF1 for Query 21 (top of plan omitted)}, label={lst:q21_explain_sf1}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
+-> Aggregate using temporary table
+    -> Inner hash join (warehouse.w_warehouse_sk = inventory.inv_warehouse_sk)  (cost=1.18e+6 rows=255824)
+        -> Table scan on warehouse  (cost=397e-6 rows=5)
+        -> Hash
+            -> Nested loop inner join  (cost=1.05e+6 rows=255824)
+                -> Nested loop inner join  (cost=248351 rows=2.3e+6)
+                    -> Filter: (date_dim.d_date between <cache>((cast('2002-03-20' as date) - interval 30 day)) and <cache>((cast('2002-03-20' as date) + interval 30 day)))  (cost=7429 rows=8051)
+                        -> Table scan on date_dim  (cost=7429 rows=72468)
+                    -> Index lookup on inventory using PRIMARY (inv_date_sk=date_dim.d_date_sk)  (cost=1.33 rows=286)
+                -> Filter: (item.i_current_price between 0.99 and 1.49)  (cost=0.25 rows=0.111)
+                    -> Single-row index lookup on item using PRIMARY (i_item_sk=inventory.inv_item_sk)  (cost=0.25 rows=1)
+\end{lstlisting}
+
+On SF2 (Listing~\ref{lst:q21_explain_sf2}) the optimiser instead starts from \texttt{warehouse} and reads \texttt{inventory} through the foreign-key index \texttt{inv\_w}, checking the date of each row only at the end of the join. The reason is a cardinality misestimate: InnoDB's sampled index statistics report 2,925 distinct values for \texttt{inv\_w} on SF2 (3 on SF1), although \texttt{inventory} references only 5 warehouses. MySQL therefore expects about 5,790 rows per warehouse, while each warehouse actually has 3,393,261. The plan reads all 16,966,305 inventory rows across all 261 weekly snapshots, although only 9 snapshots (585,045 rows, 3.4\%) fall inside the date window.
+
+\begin{lstlisting}[caption={Baseline \texttt{EXPLAIN FORMAT=TREE} on SF2 for Query 21 (top of plan omitted)}, label={lst:q21_explain_sf2}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
+-> Aggregate using temporary table
+    -> Nested loop inner join  (cost=21395 rows=357)
+        -> Nested loop inner join  (cost=20269 rows=3217)
+            -> Nested loop inner join  (cost=10136 rows=28952)
+                -> Table scan on warehouse  (cost=0.75 rows=5)
+                -> Index lookup on inventory using inv_w (inv_warehouse_sk=warehouse.w_warehouse_sk)  (cost=1564 rows=5790)
+            -> Filter: (item.i_current_price between 0.99 and 1.49)  (cost=0.25 rows=0.111)
+                -> Single-row index lookup on item using PRIMARY (i_item_sk=inventory.inv_item_sk)  (cost=0.25 rows=1)
+        -> Filter: (date_dim.d_date between <cache>((cast('2002-03-20' as date) - interval 30 day)) and <cache>((cast('2002-03-20' as date) + interval 30 day)))  (cost=0.25 rows=0.111)
+            -> Single-row index lookup on date_dim using PRIMARY (d_date_sk=inventory.inv_date_sk)  (cost=0.25 rows=1)
 \end{lstlisting}
 
 \subsubsection{Precise Application of Optimization Laws in SQL}
-We applied **Law I** and **Law III** to Query XX as follows:
+We applied \textbf{Law III} and \textbf{Law I} to Query 21 as follows:
 \begin{enumerate}
-    \item \textbf{Application of Law III (Materialised Date Driving Order):} Instead of scanning \texttt{store\_sales} and \texttt{web\_sales} and probing \texttt{date\_dim} across 4 separate CTE instantiations, we materialise the 2001--2002 dates once using \texttt{NO\_MERGE()} and drive into the fact tables' sold-date foreign key indexes via \texttt{STRAIGHT\_JOIN}.
- % Gemini has written this for Query 11. Look if there is a better one (i.e. the one with the most improvement) to do this for   
+    \item \textbf{Application of Law III (Materialised Date Driving Order):} The 61-day window is materialised as a CTE and joined to \texttt{inventory} with \texttt{STRAIGHT\_JOIN}, which fixes the date-driven access path through the primary key prefix regardless of the index statistics. The price filter becomes a semi-join on a small materialised set of item keys.
+
     \textit{Before (Baseline):}
 \begin{lstlisting}[language=SQL, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
-FROM customer, store_sales, date_dim
-WHERE c_customer_sk = ss_customer_sk
-  AND ss_sold_date_sk = d_date_sk
-  AND d_year IN (2001, 2002)
+FROM inventory, warehouse, item, date_dim
+WHERE i_current_price BETWEEN 0.99 AND 1.49
+  AND i_item_sk = inv_item_sk
+  AND inv_warehouse_sk = w_warehouse_sk
+  AND inv_date_sk = d_date_sk
+  AND d_date BETWEEN (CAST('2002-03-20' AS DATE) - INTERVAL 30 DAY)
+                 AND (CAST('2002-03-20' AS DATE) + INTERVAL 30 DAY)
+GROUP BY w_warehouse_name, i_item_id
 \end{lstlisting}
 
     \textit{After (Law III Applied):}
 \begin{lstlisting}[language=SQL, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
-WITH d_2001_2002 AS (
-    SELECT /*+ NO_MERGE() */ d_date_sk, d_year
-    FROM date_dim WHERE d_year IN (2001, 2002)
+WITH d_window AS (
+    SELECT /*+ NO_MERGE() */ d_date_sk, d_date
+    FROM date_dim
+    WHERE d_date BETWEEN (CAST('2002-03-20' AS DATE) - INTERVAL 30 DAY)
+                     AND (CAST('2002-03-20' AS DATE) + INTERVAL 30 DAY)
 ),
-ss_totals AS (
-    SELECT /*+ NO_MERGE() */ ...
-    FROM d_2001_2002 d
-    STRAIGHT_JOIN store_sales ss ON ss.ss_sold_date_sk = d.d_date_sk
-    WHERE ss.ss_customer_sk IS NOT NULL ...
+priced_items AS (
+    SELECT /*+ NO_MERGE() */ i_item_sk, i_item_id
+    FROM item WHERE i_current_price BETWEEN 0.99 AND 1.49
+), ...
+    FROM d_window d
+    STRAIGHT_JOIN inventory inv ON inv.inv_date_sk = d.d_date_sk
+    WHERE inv.inv_item_sk IN (SELECT i_item_sk FROM priced_items)
 \end{lstlisting}
 
-    \item \textbf{Application of Law I (Early Integer Surrogate-Key Grouping \& Single-Pass Year Pivot):} Because \texttt{c\_customer\_sk} functionally determines all 7 customer string attributes, we remove \texttt{customer} from inside the CTEs entirely, group by the single 4-byte integer \texttt{ss\_customer\_sk} (pivoting 2001 and 2002 totals via conditional aggregation in a single pass), join \texttt{ws\_totals} and \texttt{ss\_totals} on integer \texttt{customer\_sk}, and join \texttt{customer} once at the very end.
-
-    \textit{Before (Baseline):}
-\begin{lstlisting}[language=SQL, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
-GROUP BY c_customer_id, c_first_name, c_last_name, c_preferred_cust_flag,
-         c_birth_country, c_login, c_email_address, d_year
-...
-FROM ss t_s_firstyear, ss t_s_secyear, ws t_w_firstyear, ws t_w_secyear
-WHERE t_s_secyear.customer_id = t_s_firstyear.customer_id
-  AND t_s_firstyear.customer_id = t_w_secyear.customer_id
-  AND t_s_firstyear.customer_id = t_w_firstyear.customer_id
-\end{lstlisting}
+    \item \textbf{Application of Law I (Surrogate-Key Aggregation with Re-Aggregation):} The before/after sums are computed per integer key pair \texttt{(inv\_warehouse\_sk, inv\_item\_sk)}. Only then are \texttt{warehouse} and the item names joined, and because neither \texttt{w\_warehouse\_name} nor \texttt{i\_item\_id} is unique per key, the partial sums are aggregated again by these attributes before the ratio filter is applied.
 
     \textit{After (Law I Applied):}
 \begin{lstlisting}[language=SQL, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
-    SELECT /*+ NO_MERGE() */
-           ss.ss_customer_sk AS customer_sk,
-           SUM(CASE WHEN d.d_year = 2001 THEN ss.ss_ext_list_price - ss.ss_ext_discount_amt ELSE 0 END) AS s1_total,
-           SUM(CASE WHEN d.d_year = 2002 THEN ss.ss_ext_list_price - ss.ss_ext_discount_amt ELSE 0 END) AS s2_total,
-           COUNT(CASE WHEN d.d_year = 2002 THEN 1 END) AS has_2002
+inv_totals AS (
+    SELECT /*+ NO_MERGE() */ inv.inv_warehouse_sk, inv.inv_item_sk,
+           SUM(CASE WHEN CAST(d.d_date AS DATE) <  CAST('2002-03-20' AS DATE)
+                    THEN inv.inv_quantity_on_hand ELSE 0 END) AS inv_before,
+           SUM(CASE WHEN CAST(d.d_date AS DATE) >= CAST('2002-03-20' AS DATE)
+                    THEN inv.inv_quantity_on_hand ELSE 0 END) AS inv_after
     ...
-    GROUP BY ss.ss_customer_sk
-    HAVING s1_total > 0 AND has_2002 > 0
+    GROUP BY inv.inv_warehouse_sk, inv.inv_item_sk
 )
-SELECT c.c_customer_id AS CUSTOMER_ID, c.c_first_name AS CUSTOMER_FIRST_NAME,
-       c.c_last_name AS CUSTOMER_LAST_NAME, c.c_birth_country AS CUSTOMER_BIRTH_COUNTRY
-FROM ws_totals w
-STRAIGHT_JOIN ss_totals s ON s.customer_sk = w.customer_sk
-STRAIGHT_JOIN customer c ON c.c_customer_sk = s.customer_sk
-WHERE (w.w2_total / w.w1_total) > (s.s2_total / s.s1_total)
+SELECT * FROM (
+    SELECT w.w_warehouse_name, i.i_item_id,
+           SUM(t.inv_before) AS inv_before, SUM(t.inv_after) AS inv_after
+    FROM inv_totals t
+    STRAIGHT_JOIN warehouse w ON w.w_warehouse_sk = t.inv_warehouse_sk
+    STRAIGHT_JOIN priced_items i ON i.i_item_sk = t.inv_item_sk
+    GROUP BY w.w_warehouse_name, i.i_item_id
+) x
+WHERE (CASE WHEN inv_before > 0 THEN inv_after / inv_before ELSE NULL END)
+      BETWEEN 2.0 / 3.0 AND 3.0 / 2.0
 \end{lstlisting}
 \end{enumerate}
 
-Listing~\ref{lst:qXX_explain_opt} shows the optimised \texttt{EXPLAIN FORMAT=TREE} on SF8.
+Listing~\ref{lst:q21_explain_opt} shows the optimised plan on SF2: the date window drives into the \texttt{inventory} primary key, and \texttt{warehouse} and \texttt{item} are only probed once per aggregated key pair. The runtime on SF2 drops from 25.19\,s to 0.19\,s ($133.1\times$), and the optimised query grows only from 0.14\,s to 0.19\,s between SF1 and SF2.
 
-\begin{lstlisting}[caption={Optimized \texttt{EXPLAIN FORMAT=TREE} on SF8 for Query 11}, label={lst:q11_explain_opt}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
-% TODO: Paste Optimized Query XX EXPLAIN FORMAT=TREE output on SF8 here
+\begin{lstlisting}[caption={Optimised \texttt{EXPLAIN FORMAT=TREE} on SF2 for Query 21 (top of plan omitted)}, label={lst:q21_explain_opt}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
+-> Aggregate using temporary table
+    -> Nested loop inner join  (cost=137526 rows=0)
+        -> Nested loop inner join  (cost=68764 rows=0)
+            -> Table scan on t  (cost=2.5..2.5 rows=0)
+                -> Materialize CTE inv_totals  (cost=0..0 rows=0)
+                    -> Aggregate using temporary table
+                        -> Nested loop inner join  (cost=1.13e+6 rows=275055)
+                            -> Nested loop inner join  (cost=258668 rows=2.48e+6)
+                                -> Table scan on d  (cost=8220..8323 rows=8051)
+                                    -> Materialize CTE d_window  (cost=8220..8220 rows=8051)
+                                -> Index lookup on inv using PRIMARY (inv_date_sk=d.d_date_sk)  (cost=0.348 rows=308)
+                            -> Filter: (item.i_current_price between 0.99 and 1.49)  (cost=0.25 rows=0.111)
+                                -> Single-row index lookup on item using PRIMARY (i_item_sk=inv.inv_item_sk)  (cost=0.25 rows=1)
+            -> Single-row index lookup on w using PRIMARY (w_warehouse_sk=t.inv_warehouse_sk)  (cost=0.25 rows=1)
+        -> Filter: (item.i_current_price between 0.99 and 1.49)  (cost=0.25 rows=0.111)
+            -> Single-row index lookup on item using PRIMARY (i_item_sk=t.inv_item_sk)  (cost=0.25 rows=1)
 \end{lstlisting}
 
----
+\subsection{Other Group A Queries}
+
+\paragraph{Q4, Q11 and Q74: single-pass year pivot.} The baseline materialises a CTE that aggregates every sales channel by seven customer string columns and year (over all years for Q4 and Q11) and then self-joins it four times (six for Q4) on the string \texttt{customer\_id}. The rewrite scans each channel once, driven from the two target years of \texttt{date\_dim} through the sold-date foreign-key index (Law III), and groups by the integer customer key, computing both years with conditional aggregates such as \texttt{SUM(CASE WHEN d\_year = 2001 THEN ... END)} (Law I). The channels are then joined on \texttt{customer\_sk}, and \texttt{customer} is joined once for the output columns. Omitting the \texttt{ELSE} branch keeps a year whose values are all \texttt{NULL} at \texttt{NULL}, and a per-year \texttt{COUNT} preserves the requirement of the original self-joins that the customer has rows in both years. \texttt{STDDEV\_SAMP} in Q74 cannot be merged from partial results, but each (customer, year) group is still computed in a single aggregation. The speedups on SF2 are $19.3\times$ (Q4), $17.3\times$ (Q11) and $6.5\times$ (Q74).
+
+\paragraph{Q47: integer group identifiers and window functions.} A first attempt that pre-aggregated \texttt{store\_sales} by \texttt{(ss\_item\_sk, ss\_store\_sk, month)} gained only about $1.5\times$: on SF2 this key barely reduced the rows (1.34M to 0.96M), and the second aggregation by the string attributes added another full pass. Law I only pays off when the surrogate-key grouping is clearly coarser than the original grouping. The final version maps \texttt{(i\_category, i\_brand)} and \texttt{(s\_store\_name, s\_company\_name)} to integer group identifiers with \texttt{DENSE\_RANK} (which, like \texttt{GROUP BY}, compares strings by collation), aggregates \texttt{store\_sales} once by these integers directly into 76k groups, and replaces the three-way self-join for the previous and next month with \texttt{LAG}/\texttt{LEAD}. Since the original self-join uses equality predicates that never match \texttt{NULL}, partitions with a \texttt{NULL} category, brand, store or company name are excluded in the rewrite as well. The speedup is $5.0\times$ on SF1 and $5.9\times$ on SF2.
+
+\paragraph{Q50: fixed return-driven plan.} Q50 is already fast on SF1 and SF2 (0.03--0.05\,s); its historical degradation (0.15\,s on SF4, 75.81\,s on SF8) only appears at SF8. The rewrite fixes the access path from the 31 days of August 2001 into \texttt{store\_returns} through its returned-date index and into \texttt{store\_sales} through its primary key \texttt{(ss\_item\_sk, ss\_ticket\_number)}, counts the return intervals per \texttt{ss\_store\_sk} and only then re-aggregates by the ten store attributes. Its benefit is expected at SF8 and remains to be measured.
+
+\paragraph{Q81: decorrelated per-state threshold.} The baseline evaluates the average return per state as a dependent subquery, rescanning the matching CTE rows for every outer row, so its cost grows roughly quadratically with the data (17.72\,s on SF4, 507.15\,s on SF8 in the historical results). The rewrite materialises the per-customer returns once, driven from the 2002 dates through the \texttt{catalog\_returns} returned-date index, pre-aggregates the threshold $1.2 \times \text{AVG}$ per state (Law I) and joins it on the state. A \texttt{NULL} state matches neither the original predicate nor the join. The outer filter on \texttt{ca\_state = 'NH'} cannot be pushed into the CTE, because it refers to the customer's current address and not to the address of the return. The speedup is $20.3\times$ on SF1 and $40.0\times$ on SF2.
 
 \section{Group B: Fact-to-Fact Multi-Way Joins and Composite Primary Key Lookups (Law I + Law III)}
 
@@ -233,7 +306,7 @@ Listing~\ref{lst:q72_explain_bad} shows the \texttt{EXPLAIN FORMAT=TREE} on SF8 
 \end{lstlisting}
 
 \subsubsection{Precise Application of Optimization Laws in SQL}
-We applied **Law I** and **Law III** to Query 72 as follows:
+We applied \textbf{Law I} and \textbf{Law III} to Query 72 as follows:
 \begin{enumerate}
     \item \textbf{Application of Law I (Distributive Pre-Aggregation of \texttt{catalog\_sales}):} Any two \texttt{catalog\_sales} rows in the same week that share $(\texttt{cs\_item\_sk}, \texttt{d\_week\_seq}, \texttt{cs\_quantity})$ match the exact same set of \texttt{inventory} records under $(\texttt{cs\_item\_sk} = \texttt{inv\_item\_sk} \land \texttt{d1.d\_week\_seq} = \texttt{d2.d\_week\_seq} \land \texttt{inv\_quantity\_on\_hand} < \texttt{cs\_quantity})$. Pre-grouping \texttt{filtered\_cs} by these three integer columns collapses duplicate item-week-quantity sales before probing \texttt{inventory}, and delays joining the wide \texttt{item} (\texttt{VARCHAR(200)}) and \texttt{warehouse} strings until after the fact join.
 
@@ -316,16 +389,14 @@ Listing~\ref{lst:q72_explain_good} shows the resulting \texttt{EXPLAIN FORMAT=TR
                                     -> Hash (Constant row from EXISTS subqueries)
                                 -> Index lookup on d2 using <auto_key0> (d_week_seq = cs.d_week_seq) (Materialize CTE d2_2002)
                             -> Filter: (inv.inv_quantity_on_hand < cs.cs_quantity)  (cost=1.01 rows=2.69)
-                                -> Index lookup on inv using PRIMARY (inv_date_sk = d2.d_date_sk, inv_item\_sk = cs.cs_item_sk)  (cost=1.01 rows=8.08)
+                                -> Index lookup on inv using PRIMARY (inv_date_sk = d2.d_date_sk, inv_item_sk = cs.cs_item_sk)  (cost=1.01 rows=8.08)
                         -> Single-row index lookup on w using PRIMARY (w_warehouse_sk = inv.inv_warehouse_sk)
                     -> Single-row index lookup on i using PRIMARY (i_item_sk = cs.cs_item_sk)
 \end{lstlisting}
 
----
-
 \section{Group C: Disjunctive (\texttt{OR}) Bounding-Box Extraction and Star-Join Ordering (Law II + Law III)}
 
-Queries in Group C exhibit severe plan flips between SF4 and SF8 (degrading by $16\times$ to $2,773\times$) because equijoin predicates and dimension filters are trapped inside multi-branch disjunctive (\texttt{OR}) clauses, or because MySQL abandons selective dimension indexes in multi-table star joins. Applying **Law II** (factoring out equijoins and extracting bounding-box predicates into CTEs) together with **Law III** (materializing filtered dimensions with \texttt{NO\_MERGE()} and driving into fact indexes via \texttt{STRAIGHT\_JOIN}) restores linear scaling.
+Queries in Group C exhibit severe plan flips between SF4 and SF8 (degrading by $16\times$ to $2,773\times$) because equijoin predicates and dimension filters are trapped inside multi-branch disjunctive (\texttt{OR}) clauses, or because MySQL abandons selective dimension indexes in multi-table star joins. Applying \textbf{Law II} (factoring out equijoins and extracting bounding-box predicates into CTEs) together with \textbf{Law III} (materializing filtered dimensions with \texttt{NO\_MERGE()} and driving into fact indexes via \texttt{STRAIGHT\_JOIN}) restores linear scaling.
 
 \subsection{Group C Performance Summary}
 Table~\ref{tab:group_c_results} provides the speedup table for Group C queries across SF1, SF2, SF4, SF8, and Total.
@@ -366,7 +437,7 @@ Listing~\ref{lst:q13_explain_orig} shows the baseline \texttt{EXPLAIN FORMAT=TRE
 \end{lstlisting}
 
 \subsubsection{Precise Application of Optimization Laws in SQL}
-We applied **Law II** and **Law III** to Query 13 as follows:
+We applied \textbf{Law II} and \textbf{Law III} to Query 13 as follows:
 \begin{enumerate}
     \item \textbf{Application of Law II (Equijoin Factoring \& Disjunctive Bounding-Box Extraction):} Across the three demographic branches, \texttt{hd\_dep\_count} only ever takes values in $\{1, 3\}$ (20\% of \texttt{household\_demographics}), \texttt{(cd\_marital\_status, cd\_education\_status)} only ever matches 3 out of 35 possible combinations (8.5\% of \texttt{customer\_demographics}), and \texttt{ss\_sales\_price} is bounded by $[50.00, 200.00]$. Similarly, across the three address branches, \texttt{ca\_country = 'United States'}, \texttt{ca\_state} is bounded by the 9 target states, and \texttt{ss\_net\_profit} is bounded by $[50, 300]$. We factor out all equijoins and push the bounding-box domain filters directly into the base relations.
 

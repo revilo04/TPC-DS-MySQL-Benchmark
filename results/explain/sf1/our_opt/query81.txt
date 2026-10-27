@@ -1,0 +1,33 @@
+# queries/our_opt/query81.sql, SF1, MySQL 8.4.13, 2026-10-26T11:55:44+01:00
+-> Limit: 100 row(s)
+    -> Sort: c.c_customer_id, c.c_salutation, c.c_first_name, c.c_last_name, ca.ca_street_number, ca.ca_street_name, ca.ca_street_type, ca.ca_suite_number, ca.ca_city, ca.ca_county, ca.ca_zip, ca.ca_country, ca.ca_gmt_offset, ca.ca_location_type, ctr1.ctr_total_return, limit input to 100 row(s) per chunk
+        -> Stream results  (cost=922e+6 rows=73.8e+6)
+            -> Nested loop inner join  (cost=922e+6 rows=73.8e+6)
+                -> Nested loop inner join  (cost=849e+6 rows=738e+6)
+                    -> Nested loop inner join  (cost=775e+6 rows=738e+6)
+                        -> Filter: ((ctr1.ctr_state is not null) and (ctr1.ctr_customer_sk is not null))  (cost=0.113..52926 rows=470428)
+                            -> Table scan on ctr1  (cost=2.5..2.5 rows=0)
+                                -> Materialize CTE customer_total_return if needed  (cost=0..0 rows=0)
+                                    -> Table scan on <temporary>
+                                        -> Aggregate using temporary table
+                                            -> Nested loop inner join  (cost=337557 rows=470481)
+                                                -> Nested loop inner join  (cost=172902 rows=470481)
+                                                    -> Table scan on d  (cost=8153..8246 rows=7247)
+                                                        -> Materialize CTE d_2002 if needed  (cost=8153..8153 rows=7247)
+                                                            -> Filter: (date_dim.d_year = 2002)  (cost=7429 rows=7247)
+                                                                -> Table scan on date_dim  (cost=7429 rows=72468)
+                                                    -> Filter: (cr.cr_returning_addr_sk is not null)  (cost=16.2 rows=64.9)
+                                                        -> Index lookup on cr using cr_d1 (cr_returned_date_sk=d.d_date_sk)  (cost=16.2 rows=64.9)
+                                                -> Single-row index lookup on ca using PRIMARY (ca_address_sk=cr.cr_returning_addr_sk)  (cost=0.25 rows=1)
+                        -> Filter: (ctr1.ctr_total_return > st.threshold)  (cost=0.75..1176 rows=1568)
+                            -> Covering index lookup on st using <auto_key0> (ctr_state=ctr1.ctr_state)  (cost=0.25..1176 rows=4704)
+                                -> Materialize CTE state_threshold  (cost=0..0 rows=0)
+                                    -> Table scan on <temporary>
+                                        -> Aggregate using temporary table
+                                            -> Table scan on customer_total_return  (cost=2.5..2.5 rows=0)
+                                                -> Materialize CTE customer_total_return if needed (query plan printed elsewhere)  (cost=0..0 rows=0)
+                    -> Filter: (c.c_current_addr_sk is not null)  (cost=358e-6 rows=1)
+                        -> Single-row index lookup on c using PRIMARY (c_customer_sk=ctr1.ctr_customer_sk)  (cost=358e-6 rows=1)
+                -> Filter: (ca.ca_state = 'NH')  (cost=159e-6 rows=0.1)
+                    -> Single-row index lookup on ca using PRIMARY (ca_address_sk=c.c_current_addr_sk)  (cost=159e-6 rows=1)
+
