@@ -1,0 +1,113 @@
+{
+  "database": "tpcds",
+  "scale_factor": 1,
+  "verified_at": "2026-10-21T12:45:04.502248+00:00",
+  "tables": [
+    {
+      "table": "call_center",
+      "rows": 6
+    },
+    {
+      "table": "catalog_page",
+      "rows": 11718
+    },
+    {
+      "table": "catalog_returns",
+      "rows": 144067
+    },
+    {
+      "table": "catalog_sales",
+      "rows": 1441548
+    },
+    {
+      "table": "customer",
+      "rows": 100000
+    },
+    {
+      "table": "customer_address",
+      "rows": 50000
+    },
+    {
+      "table": "customer_demographics",
+      "rows": 1920800
+    },
+    {
+      "table": "date_dim",
+      "rows": 73049
+    },
+    {
+      "table": "dbgen_version",
+      "rows": 1
+    },
+    {
+      "table": "household_demographics",
+      "rows": 7200
+    },
+    {
+      "table": "income_band",
+      "rows": 20
+    },
+    {
+      "table": "inventory",
+      "rows": 11745000
+    },
+    {
+      "table": "item",
+      "rows": 18000
+    },
+    {
+      "table": "promotion",
+      "rows": 300
+    },
+    {
+      "table": "reason",
+      "rows": 35
+    },
+    {
+      "table": "ship_mode",
+      "rows": 20
+    },
+    {
+      "table": "store",
+      "rows": 12
+    },
+    {
+      "table": "store_returns",
+      "rows": 287514
+    },
+    {
+      "table": "store_sales",
+      "rows": 2880404
+    },
+    {
+      "table": "time_dim",
+      "rows": 86400
+    },
+    {
+      "table": "warehouse",
+      "rows": 5
+    },
+    {
+      "table": "web_page",
+      "rows": 60
+    },
+    {
+      "table": "web_returns",
+      "rows": 71763
+    },
+    {
+      "table": "web_sales",
+      "rows": 719384
+    },
+    {
+      "table": "web_site",
+      "rows": 30
+    }
+  ],
+  "mysql_version": "8.4.13",
+  "mv_inv_rows": 2700000,
+  "foreign_keys": 102,
+  "total_tables": 26,
+  "allocated_data_index_bytes": 4340203520,
+  "source_rows": 19557336
+}

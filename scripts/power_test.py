@@ -10,8 +10,13 @@ import mysql.connector
 import pandas as pd
 import seaborn as sns
 
+from scripts import run_metadata
+from scripts.config import BASELINE_QUERIES, OPTIMIZED_QUERIES, mysql_config, query_directory
 from scripts.system_stats import stats_thread
 from scripts.utils import extract_number
+
+# MySQL ER_QUERY_TIMEOUT: statement interrupted by max_execution_time
+QUERY_TIMEOUT_ERRNO = 3024
 
 
 def read_sql_files(directory):
@@ -35,77 +40,77 @@ def execute_queries(
     cold_results_dir=None,
     warm_results_dir=None,
     warmup=False
-) -> dict:
+) -> tuple:
+    """Return (query_times, failures); a failed query has time None and a (kind, message) failure."""
     query_times = {}
+    failures = {}
     for filename, query in queries.items():
         print("Executing", filename, end="...\n")
         total_time = 0
-        query_lst = query.strip().split(";")
-        query_lst = list(filter(lambda x: len(x.strip()) > 0, query_lst))
-        for q in query_lst:
-            q = q.strip()
-            if warmup:
-                # warm up the cache
-                print("executing warmup query")
-                # Select process & start thread for recording metrics
-                if monitor_resource_utils:
-                    condition = Event()
-                    stats_thread(condition, cold_results_dir, filename)
-                start_time = time.time()
-                cursor.execute(query)
-                cursor.fetchall()
-                while cursor.nextset():
-                    pass
-                if monitor_resource_utils:
-                    # stop thread
-                    condition.set()
-                    # otherwise the thread writes the next print statement to the log as well
-                    time.sleep(0.5)
-                print(
-                    "executed warmup query. took",
-                    time.time() - start_time,
-                    "seconds",
+        statements = [s.strip() for s in query.split(";") if s.strip()]
+        try:
+            for q in statements:
+                if warmup:
+                    # warm up the cache
+                    print("executing warmup query")
+                    elapsed_time = timed_statement(
+                        cursor, q, monitor_resource_utils, cold_results_dir, filename
+                    )
+                    print("executed warmup query. took", elapsed_time, "seconds")
+                total_time += timed_statement(
+                    cursor, q, monitor_resource_utils, warm_results_dir, filename
                 )
-            # Select process & start thread for recording metrics
-            if monitor_resource_utils:
-                condition = Event()
-                stats_thread(condition, warm_results_dir, filename)
-
-            # execute query again
-            start_time = time.time()
-            try:
-                for stmt in q.split(";"):
-                    s = stmt.strip()
-                    if s:
-                        cursor.execute(s)
-                        cursor.fetchall()
-                        while cursor.nextset():
-                            pass
-                end_time = time.time()
-                elapsed_time = end_time - start_time
-                total_time += elapsed_time
-            except Exception as e:
-                print(f"Error executing {filename}: {e}")
-                total_time = -1
-
-            if monitor_resource_utils:
-                # stop thread
-                condition.set()
-                # otherwise the thread writes the next print statement to the log as well
-                time.sleep(0.5)
+        except mysql.connector.Error as e:
+            # Remaining statements of a failed query are skipped
+            kind = "timeout" if e.errno == QUERY_TIMEOUT_ERRNO else "error"
+            print(f"Error executing {filename} ({kind}): {e}")
+            failures[filename] = (kind, str(e))
+            total_time = None
 
         print(f"{filename} took {total_time} seconds")
         query_times[filename] = total_time
-    return query_times
+    return query_times, failures
 
 
-# Function to save results to a file
-def save_results_to_file(query_times, scale_factor, uid):
+def timed_statement(cursor, statement, monitor_resource_utils, results_dir, filename):
+    """Execute one statement and fetch all rows; return elapsed seconds."""
+    # Select process & start thread for recording metrics
+    if monitor_resource_utils:
+        condition = Event()
+        stats_thread(condition, results_dir, filename)
+    start_time = time.perf_counter()
+    try:
+        cursor.execute(statement)
+        if cursor.with_rows:
+            cursor.fetchall()
+        while cursor.nextset():
+            pass
+        return time.perf_counter() - start_time
+    finally:
+        if monitor_resource_utils:
+            # stop thread
+            condition.set()
+            # otherwise the thread writes the next print statement to the log as well
+            time.sleep(0.5)
+
+
+def successful_total(query_times):
+    return sum(t for t in query_times.values() if t is not None)
+
+
+# Function to save results to a file; failed queries are written as nan to keep line positions
+def save_results_to_file(query_times, failures, scale_factor, uid):
     filename = f"results/pt_sf={scale_factor}_{uid}.txt"
     with open(filename, "w") as f:
         for time in query_times.values():
-            f.write(f"{time}\n")
-        f.write(f"Total Time: {sum(query_times.values())}\n")
+            f.write(f"{'nan' if time is None else time}\n")
+        f.write(f"Total Time: {successful_total(query_times)}\n")
+        if failures:
+            f.write(f"Failed Queries: {', '.join(str(n) for n in failures)}\n")
+    if failures:
+        with open(f"results/pt_sf={scale_factor}_{uid}_failures.txt", "w") as f:
+            for number, (kind, error) in failures.items():
+                f.write(f"{number}\t{kind}\t{error}\n")
 
 
 # Function to plot horizontal histogram
@@ -113,7 +118,7 @@ def plot_histogram(query_times, scale_factor, uid):
     filename = f"results/pt_sf={scale_factor}_{uid}.png"
     # Create the horizontal bar chart
     filenames, times = zip(*query_times.items())
-    query_times_df = pd.DataFrame({"Query Number": filenames, "Time (seconds)": times})
+    query_times_df = pd.DataFrame({"Query Number": filenames, "Time (seconds)": times}, dtype=float)
     # Create the Seaborn plot
     plt.figure(figsize=(10, 30))  # Increase the vertical size
     ax = sns.barplot(
@@ -131,7 +136,17 @@ def plot_histogram(query_times, scale_factor, uid):
     # plt.show()
 
 
-def power_test(scale_factor, queries_directory, uid, monitor_resource_utils=False, warmup=False):
+def select_queries(queries, query_numbers=None):
+    if not query_numbers:
+        return queries
+    missing = sorted(set(query_numbers) - set(queries))
+    if missing:
+        raise ValueError(f"Queries not found: {missing}")
+    return {number: queries[number] for number in sorted(set(query_numbers))}
+
+
+def power_test(scale_factor, queries_directory, uid, monitor_resource_utils=False, warmup=False,
+               query_numbers=None, timeout=None):
     total_time = 0
     cold_results_directory_path = f"results/{scale_factor}_{uid}_cold"
     warm_results_directory_path = f"results/{scale_factor}_{uid}_warm"
@@ -140,19 +155,25 @@ def power_test(scale_factor, queries_directory, uid, monitor_resource_utils=Fals
             os.makedirs(cold_results_directory_path)
         if not os.path.exists(warm_results_directory_path):
             os.makedirs(warm_results_directory_path)
+    conn = cursor = None
+    queries_directory = query_directory(queries_directory)
     try:
-        database = "tpcds" if scale_factor == 1 else f"tpcds{scale_factor}"
         conn = mysql.connector.connect(
-            host="localhost",
-            user="root",
-            password="YOUR_MYSQL_PASSWORD",
-            database=database,
-            charset="utf8",
-            consume_results=True,
+            **mysql_config(scale_factor), charset="utf8",
         )
         cursor = conn.cursor()
-        queries = read_sql_files(queries_directory)
-        query_times = execute_queries(
+        if timeout:
+            # Applies to each read-only SELECT statement in this session
+            cursor.execute(f"SET SESSION max_execution_time = {round(timeout * 1000)}")
+        queries = select_queries(read_sql_files(queries_directory), query_numbers)
+        metadata = run_metadata.collect(
+            cursor,
+            {"scale_factor": scale_factor, "warmup": warmup, "timeout_seconds": timeout,
+             "monitor_resource_utils": monitor_resource_utils},
+            queries_directory,
+            queries,
+        )
+        query_times, failures = execute_queries(
             queries,
             cursor,
             monitor_resource_utils,
@@ -160,27 +181,35 @@ def power_test(scale_factor, queries_directory, uid, monitor_resource_utils=Fals
             warm_results_directory_path,
             warmup
         )
-        total_time = sum(query_times.values())
+        total_time = successful_total(query_times)
     except mysql.connector.Error as e:
-        print(f"Connection failed: {e}")
+        raise RuntimeError(f"Database query failed: {e}") from e
     except KeyboardInterrupt:
-        print("User interrupted the process.")
+        raise
     else:
-        save_results_to_file(query_times, scale_factor, uid)
+        save_results_to_file(query_times, failures, scale_factor, uid)
+        metadata["total_time_seconds"] = total_time
+        metadata["failures"] = {number: kind for number, (kind, _) in failures.items()}
+        run_metadata.save(metadata, f"results/pt_sf={scale_factor}_{uid}_meta.json")
         plot_histogram(query_times, scale_factor, uid)
     finally:
-        cursor.close()
-        conn.close()
-        return total_time
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
+    if failures:
+        # Results are saved, but an incomplete power test must not be used as a timing
+        raise RuntimeError(f"{len(failures)} of {len(query_times)} queries failed: {list(failures)}")
+    return total_time
 
 
 def main(args):
     uid = datetime.now().strftime("%m-%d_%H-%M-%S")
-    qdir = f"{args.qdir}/{args.sf}/qmod"
-    if args.opt:
-        qdir += "_opt"
+    if args.query:
+        uid += "_q" + "-".join(str(n) for n in sorted(set(args.query)))
+    qdir = query_directory(args.qdir or (OPTIMIZED_QUERIES if args.opt else BASELINE_QUERIES))
     # Run the power test
-    power_test(args.sf, qdir, uid, args.mru, args.warmup)
+    power_test(args.sf, qdir, uid, args.mru, args.warmup, args.query, args.timeout)
 
 
 if __name__ == "__main__":
@@ -194,8 +223,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--qdir",
         type=str,
-        default="queries",
-        help="Directory for queries to execute",
+        default=None,
+        help="Exact SQL directory; defaults to baseline, or final_combined with --opt",
     )
     parser.add_argument(
         "--mru",
@@ -208,6 +237,19 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Whether to use folder with optimized queries",
+    )
+    parser.add_argument(
+        "--query",
+        type=int,
+        action="append",
+        default=None,
+        help="Run only this query number; repeat to select several",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="Per-statement limit in seconds (MySQL max_execution_time); timeouts count as failures",
     )
     parser.add_argument(
         "--warmup",

@@ -41,8 +41,7 @@ For Windows, use Visual Studio to open the `.sln` file and build the project.
 3. After building it, execute `./dsdgen` to build the data. Precise instructions regarding all the arguments are given in Section 3.3 of our report.
 4. Remove empty values in each file by executing the following script:
 ```bash
-chmod +x ./scripts/null_values.sh
-./null_values 1
+bash scripts/null_values.sh 1
 ```
 This means you give the bash script permission to act as an executable and then preprocess the data in `../data/1`
 
@@ -50,11 +49,10 @@ This means you give the bash script permission to act as an executable and then 
 6. Create the refresh data from `tools` using `./dsdgen`. The command to generate the data is given in Section 3.8. of our report.
 7. Preprocess the generated refresh data for each set of refresh data using the following:
 ```bash
-chmod +x ./scripts/null_values_dm.sh
-./scripts/null_values_dm.sh 1 <n> # execute for n=1,2,3,4
+bash scripts/null_values_dm.sh 1 <n> # execute for n=1,2,3,4
 ```
 8. `mkdir results` from the root directory. The results will go there.
-9. Run the benchmark using the following:
+9. After applying the local configuration below and preparing query streams and refresh data, run the full benchmark:
 ```bash
 python -m scripts.main
 ```
@@ -78,3 +76,60 @@ All scale factors (`SF1`, `SF2`, `SF4`, `SF8`) execute against a single, standar
 - **`queries/qmod_combined/`**: Full 99-query suite combining `qmod` with the previous student's optimizations (this is the folder we ran the original benchmark on).
 - **`queries/our_opt/`**: Our custom-optimized queries.
 - **`queries/final_combined/`**: The production hybrid suite used for benchmarking (automatically layers our optimizations over the baseline and previous student rewrites).
+
+## Local development configuration
+
+Run Python modules from the repository root with `.venv` activated. The standard
+load, power, throughput, and maintenance drivers share `scripts/config.py`.
+Defaults are `127.0.0.1:3306`, user `root`, and an empty password, matching a fresh
+local Homebrew installation. Override using `TPCDS_MYSQL_HOST`,
+`TPCDS_MYSQL_PORT`, `TPCDS_MYSQL_USER`, and `TPCDS_MYSQL_PASSWORD`; do not commit
+passwords. SF1 uses database `tpcds`; other scales use `tpcds<sf>`.
+
+The server must have `local_infile=ON` for imports. An administrator can enable
+it across restarts with `SET PERSIST local_infile = ON;`. Only the load and
+maintenance drivers enable local-file imports on the client.
+
+After generating data, preprocess it using:
+
+```bash
+bash scripts/null_values.sh 1
+# For refresh set 1, when generated:
+bash scripts/null_values_dm.sh 1 1
+```
+
+These macOS/Linux-compatible wrappers use `.venv/bin/python` (override with
+`TPCDS_PYTHON`). They preserve `.dat` originals and produce pipe-delimited `.csv`
+files, removing the generator's trailing record delimiter and mapping empty
+fields to MySQL `\N`. Existing `.csv` files are normalized in place; repeated
+runs produce the same content. Both copies consume disk space.
+
+Once SF1 is loaded, run the baseline with:
+
+```bash
+python -m scripts.power_test --sf 1
+# Or select the complete optimized suite:
+python -m scripts.power_test --sf 1 --opt
+# Smoke-test single queries with a warm-up run and a per-statement limit:
+python -m scripts.power_test --sf 1 --query 3 --query 39 --warmup --timeout 600
+```
+
+`--warmup` executes each statement once untimed before the timed run.
+`--timeout` sets MySQL `max_execution_time` for the session; it is disabled by
+default because long queries at larger scale factors can legitimately exceed
+any fixed limit. Each run writes `results/pt_sf=<sf>_<uid>.txt` (one line per
+query, `nan` for a failed query), `_meta.json` (settings, query file hashes,
+Git commit, MySQL variables, server uptime, versions and hardware) and, when a
+query fails or times out, `_failures.txt`. Any failure makes the command exit
+non-zero after saving results; do not use such runs as complete timings.
+
+`--qdir` accepts an exact SQL directory, defaulting to
+`queries/qmod_combined/`; `--opt` selects `queries/final_combined/` when no
+explicit directory is given. The full `scripts.main` workflow additionally
+requires generated query streams (`--streams_dir`) and refresh datasets;
+it is not the initial local smoke test. The loader drops and recreates its
+target database. The legacy MySQL Shell alternative `load_test2.py` and
+standalone `drop_fk.py` are not part of this configured workflow.
+
+Run configuration/preprocessing checks without a database:
+`python -m unittest discover -s tests -v`.

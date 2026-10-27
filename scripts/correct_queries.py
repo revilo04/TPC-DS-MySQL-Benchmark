@@ -213,8 +213,8 @@ if __name__ == "__main__":
     parser.add_argument("--qdir", type=str, default="queries")
     args = parser.parse_args()
 
-    orig_dir = f"{args.qdir}/{args.sf}/orig/"
-    tgt_dir = f"{args.qdir}/{args.sf}/qmod"
+    orig_dir = f"{args.qdir}/orig/"
+    tgt_dir = f"{args.qdir}/qmod"
 
     assert os.path.isdir(orig_dir), "Invalid query directory."
     original_queries = glob(orig_dir + "/*.sql")

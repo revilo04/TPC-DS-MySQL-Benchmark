@@ -8,6 +8,7 @@ from datetime import datetime
 import mysql.connector
 from mysql.connector import pooling
 
+from scripts.config import database_name, mysql_config
 from scripts.utils import log_time, reset_pool
 
 
@@ -29,23 +30,37 @@ def load_data_into_table(cnxpool, csv_file):
         )
     )
     elapsed_time = time.time() - start_time
+    affected_rows = cursor.rowcount
+    cursor.execute("SHOW COUNT(*) WARNINGS")
+    warning_count = cursor.fetchone()[0]
+    if warning_count:
+        cursor.execute("SHOW WARNINGS LIMIT 5")
+        warnings = cursor.fetchall()
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        raise RuntimeError(f"Import of {table_name} produced {warning_count} warnings: {warnings}")
     # Release the connection back to the pool
     conn.commit()
+    print(f"Loaded {table_name}: {affected_rows:,} rows in {elapsed_time:.1f}s", flush=True)
     cursor.close()
     conn.close()
     return elapsed_time
 
 
 def load_test(sf: int, uid: str):
+    csv_files = glob.glob(f"../data/{sf}/*.csv")
+    if not csv_files:
+        raise FileNotFoundError(f"No preprocessed CSV files in ../data/{sf}; database unchanged")
     log_file = f"results/load_test_sf={sf}_{uid}.txt"
     # Initialize connection
     conn = mysql.connector.connect(
-        host="localhost", user="root", password="YOUR_MYSQL_PASSWORD", consume_results=True, use_pure=True
+        **mysql_config(), use_pure=True
     )
     cursor = conn.cursor()
 
     # 1. Database Creation
-    db = "tpcds" if sf == 1 else f"tpcds{sf}"
+    db = database_name(sf)
     cursor.execute(f"DROP DATABASE IF EXISTS {db};")
     cursor.execute(f"CREATE DATABASE {db};")
     cursor.execute(f"USE {db};")
@@ -68,20 +83,11 @@ def load_test(sf: int, uid: str):
     log_time(log_file, "Table Creation", table_creation_time)
     # 3. Data insertion
     # Initialize Connection Pool
-    dbconfig = {
-        "host": "localhost",
-        "user": "root",
-        "password": "YOUR_MYSQL_PASSWORD",
-        "database": db,
-        "allow_local_infile": True,
-        "use_pure": True,
-        "consume_results": True,
-    }
+    dbconfig = dict(mysql_config(sf, local_infile=True), use_pure=True)
     cnxpool = pooling.MySQLConnectionPool(
         pool_name="insertion_pool", pool_size=8, **dbconfig
     )
-    csv_files = glob.glob(f"../data/{sf}/*.csv")
-    # replace / with \ for Windows
+    # Resolve file paths before passing them to MySQL.
     csv_files = list(map(os.path.abspath, csv_files))
     # replace \ with \\ for SQL
     csv_files = list(map(lambda x: x.replace("\\", "\\\\"), csv_files))
@@ -100,6 +106,7 @@ def load_test(sf: int, uid: str):
     for _ in range(8):
         reset_pool(cnxpool)
 
+    print("Adding foreign keys and indexes...", flush=True)
     # 4. Referential Integrity
     with open("tools/tpcds_ri.sql", "r") as f:
         tpcds_ri_sql = f.read().strip()
@@ -112,6 +119,7 @@ def load_test(sf: int, uid: str):
     elapsed_time = time.time() - start_time
     log_time(log_file, "Referential Integrity", elapsed_time)
 
+    print("Analyzing tables...", flush=True)
     # 5. Analyze Tables
     start_time = time.time()
     for csv_file in csv_files:
@@ -120,6 +128,7 @@ def load_test(sf: int, uid: str):
     analyze_time = time.time() - start_time
     log_time(log_file, "Analyze Time", analyze_time)
 
+    print("Building MV_INV inventory summary...", flush=True)
     q39_ct = """CREATE TABLE MV_INV (
         W_WAREHOUSE_NAME varchar(20),
         W_WAREHOUSE_SK integer,

@@ -6,6 +6,8 @@ from datetime import datetime
 
 from mysql.connector.pooling import MySQLConnectionPool
 
+from scripts.config import mysql_config, query_directory
+
 
 def read_sql_files(directory):
     queries = []
@@ -32,14 +34,8 @@ def execute_query_stream(qstream, cnxpool):
 # Function to perform the throughput test
 def throughput_test(sf, directory, uid):
     # Initialize Connection Pool
-    dbconfig = {
-        "host": "localhost",
-        "user": "root",
-        "password": "password",
-        "database": f"tpcds" if sf == 1 else f"tpcds{sf}",
-        "charset": "utf8",
-        "consume_results": True,
-    }
+    directory = query_directory(directory)
+    dbconfig = dict(mysql_config(sf), charset="utf8")
     cnxpool = MySQLConnectionPool(pool_name="throughput_pool", pool_size=4, **dbconfig)
     queries = read_sql_files(directory)
     start_time = time.time()
@@ -71,7 +67,7 @@ if __name__ == "__main__":
         "-d",
         "--directory",
         type=str,
-        default="queries",
+        default="qstreams",
         help="Directory containing the SQL files",
     )
     parser.add_argument(
@@ -84,6 +80,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     sf = args.scale_factor
-    directory = f"{args.directory}/{sf}/qmod"
-    uid = f"n={args.n}_" + datetime.now().strftime("%m-%d_%H-%M-%S")
+    directory = args.directory
+    uid = f"n={args.num}_" + datetime.now().strftime("%m-%d_%H-%M-%S")
     throughput_test(sf, directory, uid)

@@ -2,6 +2,7 @@ import argparse
 import math
 from datetime import datetime
 
+from scripts.config import BASELINE_QUERIES, query_directory
 from scripts.dm_test import data_maintenance_test
 from scripts.load_test import load_test
 from scripts.power_test import power_test
@@ -9,8 +10,9 @@ from scripts.throughput_test import throughput_test
 
 
 def main(args):
-    qdir = f"{args.qdir}/{args.sf}/qmod"
-    streams_dir = f"{args.streams_dir}/{args.sf}/qmod"
+    # Validate query inputs before load_test can recreate a database.
+    qdir = query_directory(args.qdir)
+    streams_dir = query_directory(args.streams_dir)
 
     uid = datetime.now().strftime("%m-%d_%H-%M-%S")
     T_load = load_test(args.sf, uid)
@@ -54,13 +56,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--qdir",
         type=str,
-        default="queries",
+        default=BASELINE_QUERIES,
         help="Directory for queries to execute",
     )
     parser.add_argument(
         "--streams_dir",
         type=str,
         default="qstreams",
-        help="Directory for query streams (throughput test)",
+        help="Exact directory containing generated query streams (required for full benchmark)",
     )
     main(parser.parse_args())

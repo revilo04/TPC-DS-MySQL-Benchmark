@@ -7,6 +7,7 @@ from os.path import join as pjoin
 
 import mysql.connector
 
+from scripts.config import mysql_config
 from scripts.utils import log_time, relax_connection, reset_connection_settings
 
 
@@ -249,15 +250,7 @@ def data_maintenance(cursor, all_files: list[str], log_file: str):
 def data_maintenance_test(test_num, scale_factor, uid):
     log_file = f"results/dm_test_sf={scale_factor}_n={test_num}_{uid}.txt"
 
-    db_name = "tpcds" if scale_factor == 1 else f"tpcds{scale_factor}"
-    conn = mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="YOUR_MYSQL_PASSWORD",
-        database=db_name,
-        allow_local_infile=True,
-        consume_results=True,
-    )
+    conn = mysql.connector.connect(**mysql_config(scale_factor, local_infile=True))
     cursor = conn.cursor()
     # S_q = 4
     if test_num == 1:
