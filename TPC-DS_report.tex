@@ -394,12 +394,20 @@ Listing~\ref{lst:q72_explain_good} shows the resulting \texttt{EXPLAIN FORMAT=TR
                     -> Single-row index lookup on i using PRIMARY (i_item_sk = cs.cs_item_sk)
 \end{lstlisting}
 
-\section{Group C: Disjunctive (\texttt{OR}) Bounding-Box Extraction and Star-Join Ordering (Law II + Law III)}
+\section{Group C: Disjunctive Predicate Pushdown and Star-Join Ordering (Law II + Law III)}
 
-Queries in Group C exhibit severe plan flips between SF4 and SF8 (degrading by $16\times$ to $2,773\times$) because equijoin predicates and dimension filters are trapped inside multi-branch disjunctive (\texttt{OR}) clauses, or because MySQL abandons selective dimension indexes in multi-table star joins. Applying \textbf{Law II} (factoring out equijoins and extracting bounding-box predicates into CTEs) together with \textbf{Law III} (materializing filtered dimensions with \texttt{NO\_MERGE()} and driving into fact indexes via \texttt{STRAIGHT\_JOIN}) restores linear scaling.
+Group C contains Queries 13, 46, 48, 63, 73, and 79. These are the six rewrites that reduced execution time on SF1 in our measurements. Their common challenge is that selective conditions are either coupled across several branches of an \texttt{OR} predicate or applied in a multi-table join where join order affects how much of a fact table is read. We apply the selection-pushdown rule (Law II) and the join-order rule (Law III), introduced in the optimization framework above, to expose safe filters and guide the plan toward selective inputs.
+
+\subsection{Law II: Selection Pushdown and Disjunctive Bounding-Box Extraction}
+
+Law II moves a predicate to the relation that owns the filtered attribute, so rows outside the needed domain are removed before a large join. When an \texttt{OR} combines predicates from multiple relations, each relation can first be restricted to the union of values that occur in the branches. These independent filters are only bounding boxes: they may admit cross-branch combinations that were not valid in the original query. The original branch-by-branch predicates must therefore remain as residual conditions after joining. For Query 13, the household, demographic, and address candidates are filtered in advance, and the fact rows receive broad price and profit bounds while the exact correlations are preserved.
+
+\subsection{Law III: Join Associativity and Deliberate Physical Join Order}
+
+Inner joins can be associated in different orders without changing their relational result, but each order can produce different intermediate cardinalities and access paths. Law III materializes useful filtered inputs with \texttt{NO\_MERGE()} and uses \texttt{STRAIGHT\_JOIN} where needed to drive from a selective date or dimension input into a fact-table index. These are plan-shaping techniques rather than performance guarantees; the resulting execution tree must be checked for each workload and scale factor.
 
 \subsection{Group C Performance Summary}
-Table~\ref{tab:group_c_results} provides the speedup table for Group C queries across SF1, SF2, SF4, SF8, and Total.
+The table is restricted to the six Group C queries with positive SF1 execution-time results. Timing and aggregate summary values are left blank pending the completed group summary.
 
 \begin{table}[htbp]
 \centering
@@ -408,43 +416,55 @@ Table~\ref{tab:group_c_results} provides the speedup table for Group C queries a
 \begin{tabular}{@{}lrrrrr@{}}
 \toprule
 \textbf{Query} & \textbf{SF1 ($\times$)} & \textbf{SF2 ($\times$)} & \textbf{SF4 ($\times$)} & \textbf{SF8 ($\times$)} & \textbf{Total ($\times$)} \\ \midrule
-Query 7  & -- & -- & -- & -- & -- \\
 Query 13 & -- & -- & -- & -- & -- \\
-Query 19 & -- & -- & -- & -- & -- \\
-Query 27 & -- & -- & -- & -- & -- \\
-Query 36 & -- & -- & -- & -- & -- \\
-Query 43 & -- & -- & -- & -- & -- \\
 Query 46 & -- & -- & -- & -- & -- \\
 Query 48 & -- & -- & -- & -- & -- \\
-Query 53 & -- & -- & -- & -- & -- \\
 Query 63 & -- & -- & -- & -- & -- \\
 Query 73 & -- & -- & -- & -- & -- \\
-Query 79 & -- & -- & -- & -- & -- \\
-Query 89 & -- & -- & -- & -- & -- \\ \midrule
+Query 79 & -- & -- & -- & -- & -- \\ \midrule
 \textbf{Group C Total / Average} & \textbf{--} & \textbf{--} & \textbf{--} & \textbf{--} & \textbf{--} \\ \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{Group C Highlight: Query 13 Optimization}
 
-\subsubsection{Baseline Execution Plan and Bottleneck Analysis}
-In the baseline benchmark, \textbf{Query 13} was the second slowest query at SF8, jumping from 3.67s at SF1 and 17.96s at SF4 to \textbf{715.51s} at SF8 ($194.98\times$ degradation). Inspection of \texttt{qmod\_combined/query13.sql} reveals that the equijoin conditions \texttt{ss\_hdemo\_sk = hd\_demo\_sk}, \texttt{cd\_demo\_sk = ss\_cdemo\_sk}, and \texttt{ss\_addr\_sk = ca\_address\_sk} are repeated inside each branch of two 3-way \texttt{OR} blocks. Consequently, MySQL fails to push the dimension filters down before joining, scanning millions of rows across \texttt{store\_sales} ($\approx 23\text{M}$ rows at SF8), \texttt{customer\_demographics} ($1.92\text{M}$ rows), and \texttt{customer\_address} ($400\text{K}$ rows).
+\subsubsection{Query Description and SF1 Baseline Plan}
+Query 13 computes the average quantity, average extended sales price, average extended wholesale cost, and total extended wholesale cost for 2001 store sales. Rows qualify through two correlated three-branch disjunctions: one combines household dependent count, customer marital status and education, and sales-price ranges; the other combines address-state groups with net-profit ranges.
 
-Listing~\ref{lst:q13_explain_orig} shows the baseline \texttt{EXPLAIN FORMAT=TREE} on SF8.
+At SF8, the baseline Query 13 was the second-longest executing query in the workload, taking 715.51\,s. This large increase at the larger scale factor shows that the baseline plan does not scale well. SF8 baseline and optimized execution trees have not yet been collected; the trees below are the available SF1 \texttt{EXPLAIN ANALYZE} output.
 
-\begin{lstlisting}[caption={Baseline \texttt{EXPLAIN FORMAT=TREE} on SF8 for Query 13}, label={lst:q13_explain_orig}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
-% TODO: Paste Baseline Query 13 EXPLAIN FORMAT=TREE output on SF8 here
+The SF1 baseline plan begins with a scan of \texttt{customer\_address}, then performs 13,837 address-driven lookups into \texttt{store\_sales} using the \texttt{ss\_a} index. It applies the fact-side price/profit and correlated \texttt{OR} conditions during those lookups, and checks the 2001 date predicate only after several joins. The resulting nested-loop plan takes 107,374\,ms in this recorded analysis run.
+
+\begin{lstlisting}[caption={Baseline \texttt{EXPLAIN ANALYZE} tree on SF1 for Query 13}, label={lst:q13_explain_base_sf1}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
+-> Aggregate: avg(store_sales.ss_quantity), avg(store_sales.ss_ext_sales_price), avg(store_sales.ss_ext_wholesale_cost), sum(store_sales.ss_ext_wholesale_cost)  (cost=324051 rows=1) (actual time=107374..107374 rows=1 loops=1)
+    -> Nested loop inner join  (cost=324047 rows=37.5) (actual time=3554..107373 rows=5 loops=1)
+        -> Nested loop inner join  (cost=323223 rows=750) (actual time=23.8..107282 rows=274 loops=1)
+            -> Nested loop inner join  (cost=315128 rows=7496) (actual time=12.7..107274 rows=1453 loops=1)
+                -> Nested loop inner join  (cost=304618 rows=27660) (actual time=3.99..107140 rows=14165 loops=1)
+                    -> Nested loop inner join  (cost=294937 rows=27660) (actual time=3.98..107080 rows=14165 loops=1)
+                        -> Filter: (((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('IA','MN','MT'))) or ((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('AR','IN','TX'))) or ((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('TN','NE','WV'))))  (cost=5513 rows=4345) (actual time=0.191..179 rows=13837 loops=1)
+                            -> Table scan on customer_address  (cost=5513 rows=49753) (actual time=0.17..143 rows=50000 loops=1)
+                        -> Filter: (((store_sales.ss_sales_price between 100.00 and 150.00) or (store_sales.ss_sales_price between 50.00 and 100.00) or (store_sales.ss_sales_price between 150.00 and 200.00)) and (((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('IA','MN','MT')) and (store_sales.ss_net_profit between 100 and 200)) or ((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('AR','IN','TX')) and (store_sales.ss_net_profit between 150 and 300)) or ((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('TN','NE','WV')) and (store_sales.ss_net_profit between 50 and 250))) and (store_sales.ss_store_sk is not null) and (store_sales.ss_hdemo_sk is not null) and (store_sales.ss_sold_date_sk is not null) and (store_sales.ss_cdemo_sk is not null))  (cost=59.4 rows=6.37) (actual time=6.44..7.72 rows=1.02 loops=13837)
+                            -> Index lookup on store_sales using ss_a (ss_addr_sk=customer_address.ca_address_sk)  (cost=59.4 rows=71.9) (actual time=5.49..7.69 rows=55.2 loops=13837)
+                    -> Single-row covering index lookup on store using PRIMARY (s_store_sk=store_sales.ss_store_sk)  (cost=0.25 rows=1) (actual time=0.00375..0.00378 rows=1 loops=14165)
+                -> Filter: (((household_demographics.hd_dep_count = 3) and (store_sales.ss_sales_price between 100.00 and 150.00)) or ((household_demographics.hd_dep_count = 1) and (store_sales.ss_sales_price between 50.00 and 100.00)) or ((household_demographics.hd_dep_count = 1) and (store_sales.ss_sales_price between 150.00 and 200.00)))  (cost=0.28 rows=0.271) (actual time=0.0089..0.00891 rows=0.103 loops=14165)
+                    -> Single-row index lookup on household_demographics using PRIMARY (hd_demo_sk=store_sales.ss_hdemo_sk)  (cost=0.28 rows=1) (actual time=0.00751..0.00755 rows=1 loops=14165)
+            -> Filter: (date_dim.d_year = 2001)  (cost=0.98 rows=0.1) (actual time=0.00551..0.00553 rows=0.189 loops=1453)
+                -> Single-row index lookup on date_dim using PRIMARY (d_date_sk=store_sales.ss_sold_date_sk)  (cost=0.98 rows=1) (actual time=0.00501..0.00504 rows=1 loops=1453)
+        -> Filter: (((household_demographics.hd_dep_count = 3) and (customer_demographics.cd_education_status = 'Secondary') and (customer_demographics.cd_marital_status = 'S') and (store_sales.ss_sales_price between 100.00 and 150.00)) or ((household_demographics.hd_dep_count = 1) and (customer_demographics.cd_education_status = '4 yr Degree') and (customer_demographics.cd_marital_status = 'U') and (store_sales.ss_sales_price between 50.00 and 100.00)) or ((household_demographics.hd_dep_count = 1) and (customer_demographics.cd_education_status = '2 yr Degree') and (customer_demographics.cd_marital_status = 'W') and (store_sales.ss_sales_price between 150.00 and 200.00)))  (cost=1 rows=0.05) (actual time=0.331..0.331 rows=0.0182 loops=274)
+            -> Single-row index lookup on customer_demographics using PRIMARY (cd_demo_sk=store_sales.ss_cdemo_sk)  (cost=1 rows=1) (actual time=0.327..0.327 rows=1 loops=274)
 \end{lstlisting}
 
-\subsubsection{Precise Application of Optimization Laws in SQL}
-We applied \textbf{Law II} and \textbf{Law III} to Query 13 as follows:
-\begin{enumerate}
-    \item \textbf{Application of Law II (Equijoin Factoring \& Disjunctive Bounding-Box Extraction):} Across the three demographic branches, \texttt{hd\_dep\_count} only ever takes values in $\{1, 3\}$ (20\% of \texttt{household\_demographics}), \texttt{(cd\_marital\_status, cd\_education\_status)} only ever matches 3 out of 35 possible combinations (8.5\% of \texttt{customer\_demographics}), and \texttt{ss\_sales\_price} is bounded by $[50.00, 200.00]$. Similarly, across the three address branches, \texttt{ca\_country = 'United States'}, \texttt{ca\_state} is bounded by the 9 target states, and \texttt{ss\_net\_profit} is bounded by $[50, 300]$. We factor out all equijoins and push the bounding-box domain filters directly into the base relations.
+\subsubsection{Application of the Optimization Laws}
+The baseline query repeats equijoin conditions inside the \texttt{OR} alternatives, including the household, demographic, and address surrogate-key joins. The rewrite factors those joins into explicit joins and retains each branch's original condition after applying safe, broader filters.
 
-    \textit{Before (Baseline):}
+\paragraph{Law II: Selection pushdown and bounding boxes.}
+The baseline branches only use dependent counts 1 and 3, three status/education pairs, nine states, sales prices from 50 to 200, and net profits from 50 to 300. The optimized query filters each dimension to those candidate values and applies the broad fact bounds before testing the original branch pairings. The broad bounds do not replace the exact branch predicates.
+
+\textit{Before (baseline):}
 \begin{lstlisting}[language=SQL, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
 AND ((ss_hdemo_sk = hd_demo_sk AND cd_demo_sk = ss_cdemo_sk
-      AND cd_marital_status = 'M' AND cd_education_status = 'Secondary'
+      AND cd_marital_status = 'S' AND cd_education_status = 'Secondary'
       AND ss_sales_price BETWEEN 100.00 AND 150.00 AND hd_dep_count = 3)
   OR (ss_hdemo_sk = hd_demo_sk AND cd_demo_sk = ss_cdemo_sk
       AND cd_marital_status = 'U' AND cd_education_status = '4 yr Degree'
@@ -452,36 +472,52 @@ AND ((ss_hdemo_sk = hd_demo_sk AND cd_demo_sk = ss_cdemo_sk
   OR (ss_hdemo_sk = hd_demo_sk AND cd_demo_sk = ss_cdemo_sk
       AND cd_marital_status = 'W' AND cd_education_status = '2 yr Degree'
       AND ss_sales_price BETWEEN 150.00 AND 200.00 AND hd_dep_count = 1))
+AND ((ss_addr_sk = ca_address_sk AND ca_country = 'United States'
+      AND ca_state IN ('IA', 'MN', 'MT') AND ss_net_profit BETWEEN 100 AND 200)
+  OR (ss_addr_sk = ca_address_sk AND ca_country = 'United States'
+      AND ca_state IN ('AR', 'IN', 'TX') AND ss_net_profit BETWEEN 150 AND 300)
+  OR (ss_addr_sk = ca_address_sk AND ca_country = 'United States'
+      AND ca_state IN ('TN', 'NE', 'WV') AND ss_net_profit BETWEEN 50 AND 250))
 \end{lstlisting}
 
-    \textit{After (Law II Applied):}
+\textit{After (Law II applied):}
 \begin{lstlisting}[language=SQL, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
-filtered_hd AS (
-    SELECT /*+ NO_MERGE() */ hd_demo_sk, hd_dep_count
-    FROM household_demographics WHERE hd_dep_count IN (1, 3)
+filtered_households AS (
+    SELECT hd_demo_sk, hd_dep_count
+    FROM household_demographics
+    WHERE hd_dep_count IN (1, 3)
 ),
-filtered_cd AS (
-    SELECT /*+ NO_MERGE() */ cd_demo_sk, cd_marital_status, cd_education_status
+filtered_demographics AS (
+    SELECT cd_demo_sk, cd_marital_status, cd_education_status
     FROM customer_demographics
-    WHERE (cd_marital_status = 'M' AND cd_education_status = 'Secondary')
+    WHERE (cd_marital_status = 'S' AND cd_education_status = 'Secondary')
        OR (cd_marital_status = 'U' AND cd_education_status = '4 yr Degree')
        OR (cd_marital_status = 'W' AND cd_education_status = '2 yr Degree')
 ),
-filtered_ca AS (
-    SELECT /*+ NO_MERGE() */ ca_address_sk, ca_state
+filtered_addresses AS (
+    SELECT ca_address_sk, ca_state
     FROM customer_address
     WHERE ca_country = 'United States'
-      AND ca_state IN ('IA', 'MO', 'TX', 'GA', 'LA', 'SD', 'NY', 'TN', 'VA')
+      AND ca_state IN ('IA', 'MN', 'MT', 'AR', 'IN', 'TX', 'TN', 'NE', 'WV')
 )
 ...
 WHERE ss.ss_sales_price BETWEEN 50.00 AND 200.00
   AND ss.ss_net_profit BETWEEN 50 AND 300
-  AND ( ... /* exact branch correlation checks */ )
+  AND ((cd.cd_marital_status = 'S' AND cd.cd_education_status = 'Secondary'
+        AND ss.ss_sales_price BETWEEN 100.00 AND 150.00 AND hd.hd_dep_count = 3)
+    OR (cd.cd_marital_status = 'U' AND cd.cd_education_status = '4 yr Degree'
+        AND ss.ss_sales_price BETWEEN 50.00 AND 100.00 AND hd.hd_dep_count = 1)
+    OR (cd.cd_marital_status = 'W' AND cd.cd_education_status = '2 yr Degree'
+        AND ss.ss_sales_price BETWEEN 150.00 AND 200.00 AND hd.hd_dep_count = 1))
+  AND ((ca.ca_state IN ('IA', 'MN', 'MT') AND ss.ss_net_profit BETWEEN 100 AND 200)
+    OR (ca.ca_state IN ('AR', 'IN', 'TX') AND ss.ss_net_profit BETWEEN 150 AND 300)
+    OR (ca.ca_state IN ('TN', 'NE', 'WV') AND ss.ss_net_profit BETWEEN 50 AND 250))
 \end{lstlisting}
 
-    \item \textbf{Application of Law III (Materialised Dimension Driving Order):} By materializing \texttt{filtered\_dates} (\texttt{d\_year = 2001}) with \texttt{NO\_MERGE()} and using \texttt{STRAIGHT\_JOIN}, MySQL drives from the 365 days of 2001 into \texttt{store\_sales} via its sold-date foreign key index, filters \texttt{ss\_sales\_price} and \texttt{ss\_net\_profit} immediately on the fact row, and probes the tiny materialised dimension tables in memory.
+\paragraph{Law III: Materialized date input and fact-table driving order.}
+The baseline lists all six relations together and leaves join order to the optimizer. The rewrite materializes the 365 date keys for 2001 and uses \texttt{STRAIGHT\_JOIN} to drive from those dates into \texttt{store\_sales} through the sold-date index. The SF1 optimized tree shows this intended order: it performs 365 date-driven index lookups, applies broad bounds, and then joins the filtered dimensions. In this recorded \texttt{EXPLAIN ANALYZE} run, the optimized tree takes 54,804\,ms versus 107,374\,ms for the baseline, a reduction of about 49\%. This remains a substantial SF1 runtime; the tree shows the date-driven fact lookups as the dominant work, rather than eliminating the fact scan cost.
 
-    \textit{Before (Baseline):}
+\textit{Before (baseline):}
 \begin{lstlisting}[language=SQL, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
 FROM store_sales, store, customer_demographics,
      household_demographics, customer_address, date_dim
@@ -489,21 +525,72 @@ WHERE s_store_sk = ss_store_sk
   AND ss_sold_date_sk = d_date_sk AND d_year = 2001
 \end{lstlisting}
 
-    \textit{After (Law III Applied):}
+\textit{After (Law III applied):}
 \begin{lstlisting}[language=SQL, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
-FROM filtered_dates d
-STRAIGHT_JOIN store_sales ss ON ss.ss_sold_date_sk = d.d_date_sk
+WITH filtered_dates AS (
+    SELECT d_date_sk FROM date_dim WHERE d_year = 2001
+),
+eligible_sales AS (
+    SELECT /*+ NO_MERGE(d) */ ...
+    FROM filtered_dates d
+    STRAIGHT_JOIN store_sales ss ON ss.ss_sold_date_sk = d.d_date_sk
+    WHERE ss.ss_sales_price BETWEEN 50.00 AND 200.00
+      AND ss.ss_net_profit BETWEEN 50 AND 300
+)
+SELECT ...
+FROM eligible_sales ss
 STRAIGHT_JOIN store s ON s.s_store_sk = ss.ss_store_sk
-STRAIGHT_JOIN filtered_hd hd ON ss.ss_hdemo_sk = hd.hd_demo_sk
-STRAIGHT_JOIN filtered_cd cd ON ss.ss_cdemo_sk = cd.cd_demo_sk
-STRAIGHT_JOIN filtered_ca ca ON ss.ss_addr_sk = ca.ca_address_sk
+STRAIGHT_JOIN filtered_households hd ON hd.hd_demo_sk = ss.ss_hdemo_sk
+STRAIGHT_JOIN filtered_demographics cd ON cd.cd_demo_sk = ss.ss_cdemo_sk
+STRAIGHT_JOIN filtered_addresses ca ON ca.ca_address_sk = ss.ss_addr_sk
 \end{lstlisting}
-\end{enumerate}
 
-Listing~\ref{lst:q13_explain_opt} shows the resulting \texttt{EXPLAIN FORMAT=TREE} on SF8 for the optimised Query 13.
+\subsubsection{SF1 Optimized Execution Plan}
+The optimized plan begins with a materialized 365-row \texttt{filtered\_dates} CTE, then uses the \texttt{ss\_d} index on \texttt{store\_sales} for each date key. The broad bounds reduce those lookups to 17,467 materialized sales rows before dimension joins. Household, demographic, and address candidate sets are materialized and probed by surrogate key. The root actual time is 54,804\,ms; the demographic and address CTEs still require full dimension-table scans at SF1.
 
-\begin{lstlisting}[caption={Optimised \texttt{EXPLAIN FORMAT=TREE} on SF8 for Query 13}, label={lst:q13_explain_opt}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
-% TODO: Paste Optimised Query 13 EXPLAIN FORMAT=TREE output on SF8 here
+\begin{lstlisting}[caption={Optimized \texttt{EXPLAIN ANALYZE} tree on SF1 for Query 13}, label={lst:q13_explain_opt_sf1}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
+-> Aggregate: avg(ss.ss_quantity), avg(ss.ss_ext_sales_price), avg(ss.ss_ext_wholesale_cost), sum(ss.ss_ext_wholesale_cost)  (cost=725360 rows=1) (actual time=54804..54804 rows=1 loops=1)
+    -> Nested loop inner join  (cost=688257 rows=371033) (actual time=54784..54804 rows=5 loops=1)
+        -> Nested loop inner join  (cost=490599 rows=33277) (actual time=54734..54760 rows=53 loops=1)
+            -> Nested loop inner join  (cost=98459 rows=57293) (actual time=53856..53881 rows=1793 loops=1)
+                -> Nested loop inner join  (cost=24464 rows=15101) (actual time=53853..53869 rows=17262 loops=1)
+                    -> Filter: (((ss.ss_sales_price between 100.00 and 150.00) or (ss.ss_sales_price between 50.00 and 100.00) or (ss.ss_sales_price between 150.00 and 200.00)) and ((ss.ss_net_profit between 100 and 200) or (ss.ss_net_profit between 150 and 300) or (ss.ss_net_profit between 50 and 250)) and (ss.ss_store_sk is not null) and (ss.ss_hdemo_sk is not null) and (ss.ss_cdemo_sk is not null) and (ss.ss_addr_sk is not null))  (cost=13.9e+6..19179 rows=15101) (actual time=53853..53858 rows=17262 loops=1)
+                        -> Table scan on ss  (cost=13.9e+6..13.9e+6 rows=170478) (actual time=53852..53854 rows=17467 loops=1)
+                            -> Materialize CTE eligible_sales  (cost=13.9e+6..13.9e+6 rows=170478) (actual time=53852..53852 rows=17467 loops=1)
+                                -> Nested loop inner join  (cost=13.9e+6 rows=170478) (actual time=69.9..53833 rows=17467 loops=1)
+                                    -> Table scan on d  (cost=8631..8724 rows=7247) (actual time=43..43.5 rows=365 loops=1)
+                                        -> Materialize CTE filtered_dates  (cost=8631..8631 rows=7247) (actual time=43..43 rows=365 loops=1)
+                                            -> Filter: (date_dim.d_year = 2001)  (cost=7906 rows=7247) (actual time=29.2..42.9 rows=365 loops=1)
+                                                -> Table scan on date_dim  (cost=7906 rows=72468) (actual time=4.68..40.2 rows=73049 loops=1)
+                                    -> Filter: ((ss.ss_sales_price between 50.00 and 200.00) and (ss.ss_net_profit between 50 and 300))  (cost=1724 rows=23.5) (actual time=18.6..147 rows=47.9 loops=365)
+                                        -> Index lookup on ss using ss_d (ss_sold_date_sk=d.d_date_sk)  (cost=1724 rows=1906) (actual time=18.5..147 rows=1497 loops=365)
+                    -> Single-row covering index lookup on s using PRIMARY (s_store_sk=ss.ss_store_sk)  (cost=0.25 rows=1) (actual time=477e-6..496e-6 rows=1 loops=17262)
+                -> Filter: (((hd.hd_dep_count = 3) and (ss.ss_sales_price between 100.00 and 150.00)) or ((hd.hd_dep_count = 1) and (ss.ss_sales_price between 50.00 and 100.00)) or ((hd.hd_dep_count = 1) and (ss.ss_sales_price between 150.00 and 200.00)))  (cost=636..3.5 rows=3.79) (actual time=649e-6..665e-6 rows=0.104 loops=17262)
+                    -> Covering index lookup on hd using <auto_key0> (hd_demo_sk=ss.ss_hdemo_sk)  (cost=863..867 rows=14) (actual time=507e-6..531e-6 rows=0.208 loops=17262)
+                        -> Materialize CTE filtered_households  (cost=863..863 rows=1426) (actual time=3.2..3.2 rows=1440 loops=1)
+                            -> Filter: (household_demographics.hd_dep_count in (1,3))  (cost=720 rows=1426) (actual time=0.31..2.28 rows=1440 loops=1)
+                                -> Table scan on household_demographics  (cost=720 rows=7131) (actual time=0.284..1.99 rows=7200 loops=1)
+            -> Filter: (((hd.hd_dep_count = 3) and (cd.cd_education_status = 'Secondary') and (cd.cd_marital_status = 'S') and (ss.ss_sales_price between 100.00 and 150.00)) or ((hd.hd_dep_count = 1) and (cd.cd_education_status = '4 yr Degree') and (cd.cd_marital_status = 'U') and (ss.ss_sales_price between 50.00 and 100.00)) or ((hd.hd_dep_count = 1) and (cd.cd_education_status = '2 yr Degree') and (cd.cd_marital_status = 'W') and (ss.ss_sales_price between 150.00 and 200.00)))  (cost=4.89..4.89 rows=0.581) (actual time=0.49..0.49 rows=0.0296 loops=1793)
+                -> Index lookup on cd using <auto_key1> (cd_demo_sk=ss.ss_cdemo_sk)  (cost=204780..204785 rows=19.6) (actual time=0.49..0.49 rows=0.0909 loops=1793)
+                    -> Materialize CTE filtered_demographics  (cost=204780..204780 rows=56770) (actual time=876..876 rows=164640 loops=1)
+                        -> Filter: (((customer_demographics.cd_education_status = 'Secondary') and (customer_demographics.cd_marital_status = 'S')) or ((customer_demographics.cd_education_status = '4 yr Degree') and (customer_demographics.cd_marital_status = 'U')) or ((customer_demographics.cd_education_status = '2 yr Degree') and (customer_demographics.cd_marital_status = 'W')))  (cost=199103 rows=56770) (actual time=2.28..622 rows=164640 loops=1)
+                            -> Table scan on customer_demographics  (cost=199103 rows=1.91e+6) (actual time=2.21..368 rows=1.92e+6 loops=1)
+        -> Filter: (((ca.ca_state in ('IA','MN','MT')) and (ss.ss_net_profit between 100 and 200)) or ((ca.ca_state in ('AR','IN','TX')) and (ss.ss_net_profit between 150 and 300)) or ((ca.ca_state in ('TN','NE','WV')) and (ss.ss_net_profit between 50 and 250)))  (cost=4880..4.24 rows=11.1) (actual time=0.831..0.831 rows=0.0943 loops=53)
+            -> Index lookup on ca using <auto_key1> (ca_address_sk=ss.ss_addr_sk)  (cost=5361..5365 rows=17) (actual time=0.83..0.83 rows=0.189 loops=53)
+                -> Materialize CTE filtered_addresses  (cost=5360..5360 rows=2488) (actual time=43.9..43.9 rows=13837 loops=1)
+                    -> Filter: ((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('IA','MN','MT','AR','IN','TX','TN','NE','WV')))  (cost=5112 rows=2488) (actual time=0.403..37.1 rows=13837 loops=1)
+                        -> Table scan on customer_address  (cost=5112 rows=49753) (actual time=0.351..28 rows=50000 loops=1)
+\end{lstlisting}
+
+\subsubsection{SF8 Execution Plan Placeholders}
+The baseline Query 13 is the second-longest query at SF8, but SF8 execution trees have not yet been collected. Insert the corresponding measured trees when available.
+
+\begin{lstlisting}[caption={Baseline Query 13 \texttt{EXPLAIN ANALYZE} tree on SF8 (pending)}, label={lst:q13_explain_base_sf8}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
+[SF8 baseline execution tree pending collection]
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Optimized Query 13 \texttt{EXPLAIN ANALYZE} tree on SF8 (pending)}, label={lst:q13_explain_opt_sf8}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
+[SF8 optimized execution tree pending collection]
 \end{lstlisting}
 
 \end{document}
