@@ -1,5 +1,5 @@
 ## TODO task:
-- update readme.md: single script to run the whole repo
+- [x] Rewrite the README and add a single script to run the full benchmark workflow
 - clean the repo
 - 
 
