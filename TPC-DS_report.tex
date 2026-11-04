@@ -3,6 +3,7 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{listings}
+\usepackage{graphicx}
 \sceau{Pictures/sceauULB.jpg}
 
 \addbibresource{biblio.bib}
@@ -19,7 +20,23 @@
 	logo={Pictures/logo-polytech.jpg},
 	manyAuthor}
 
-\chapter{Report}
+\chapter*{Abstract}
+
+\textit{[TODO (Jacob): abstract, to be written once the results are final.]}
+
+\chapter*{AI Statement}
+
+This project was carried out by the team members, who designed the benchmark methodology, selected and analysed the queries, made all optimisation decisions and interpreted the results. AI tools (large language model assistants) were used in a supporting role: mainly to help write and debug code, such as the benchmark and analysis scripts, and to a lesser extent to help edit parts of the report text. All AI-assisted output was reviewed and verified by the team. Every optimised query was checked against its baseline by comparing complete result sets, all reported measurements come from our own benchmark runs, and the team takes full responsibility for the content of this report.
+
+\chapter{Background}
+
+\section{TPC-DS}
+
+\textit{[TODO (Neha): the TPC-DS benchmark, its schema, data generator and query workload.]}
+
+\section{MySQL}
+
+\textit{[TODO (Neha): MySQL and the InnoDB storage engine features relevant to this benchmark.]}
 
 \section{Generalised Relational and Physical Optimization Framework}
 
@@ -67,18 +84,94 @@ Two physical mechanics in MySQL 8.0 InnoDB govern how join trees scale from SF1 
     \item \textbf{Driving into InnoDB Clustered Composite Primary Keys and Foreign Key B-Trees:} In InnoDB, every table is physically clustered around its \texttt{PRIMARY KEY}, and every foreign key constraint creates a secondary B-Tree index. In TPC-DS, fact tables have composite primary keys such as \texttt{inventory(inv\_date\_sk, inv\_item\_sk, inv\_warehouse\_sk)} or \texttt{store\_sales(ss\_item\_sk, ss\_ticket\_number)}, as well as foreign key indexes on date surrogate keys (e.g., \texttt{cs\_sold\_date\_sk}, \texttt{ss\_sold\_date\_sk}). By combining materialised selective dimension CTEs with \texttt{STRAIGHT\_JOIN}, we force MySQL to drive the execution plan from the small filtered dimension CTE directly into the fact table's Foreign Key index or left-prefix Composite Primary Key, converting 94-million-row full table scans into $O(\log N)$ B-Tree point lookups.
 \end{enumerate}
 
+\chapter{Implementation}
+
+\section{System Requirements}
+All benchmarks were run on a MacBook Pro with an Apple M5 Pro chip and 24GB of unified memory, connected to AC power with High Power Mode enabled and disk/system sleep disabled. To maximise in-memory output without triggering OS memory pressure, we allocated 14GB of RAM to the MySQL InnoDB Buffer Pool, an extra 1GB for in-memory temporary tables and 256MB per hash-join buffer and 64MB per sort buffer. This setup leaves enough room for OS system processes, ensuring no buffer pool pages are swapped to SSD.
+
+\section{Methodology}
+\label{sec:methodology}
+Following standard scientific principles in TPC-DS (CITE), we execute each query 5 times across each scalefactor (SF1, SF2, SF4, SF8). To isolate steady-state warm cache performance from cold-disk I/O, we treat Run 1 as a cache warmup run, and compute the mean, median and standard deviation across Runs 2 to 5. Between scale factors, MySQL is restarted to flush the InnoDB Buffer Pool. As our baseline, we used the queries from STUDENT REF repository.
+
+\section{Important Notice}
+\label{sec:important_notice}
+During our work, we noticed that some of the baseline rewrites introduced by STUDENT REF altered the original query semantics.
+
+The following 4 queries produce different results:
+
+\begin{itemize}
+    \item Q4: uses 2001 totals instead of 2001$\rightarrow$2002 growth (245 rows instead of 8)
+    \item Q11: returns \texttt{customer\_birth\_country} instead of \texttt{customer\_login}
+    \item Q72: the demographics filters became always-true \texttt{EXISTS}
+    \item Q78: the \texttt{ORDER BY} was changed, so \texttt{LIMIT 100} returns different rows
+\end{itemize}
+
+After consultation with the professor, we have kept our optimisations that were built upon the incorrect queries. We believe we have still been able to demonstrate extensive understanding of benchmarking, identifying bottlenecks, query rewrites and execution plan tuning. Nevertheless, we strongly recommend future work to fix these queries before using our work as a new baseline.
+
+\chapter{Results and Discussion}
+
+\section{Benchmark}
+\label{sec:benchmark}
+
+\subsection{Query Optimisation Trade-offs Across Scale Factors}
+
+\textit{[TODO (Sagar): trade-offs of the query optimisations with respect to the scale factor.]}
+
+\subsection{Total Runtime Across Scale Factors}
+
+Figure~\ref{fig:total_runtime} compares the total runtime of the 99 queries of the historical baseline (\texttt{qmod\_combined}) with the optimised suite (\texttt{final\_combined}, median of the four warm runs described in the methodology) for each scale factor. The baseline grows from 397.8\,s at SF1 to 14,818.9\,s at SF8, a $37.2\times$ increase for $8\times$ more data, and stays well above linear scaling from SF2 onwards. The optimised suite grows from 160.3\,s to 1,681.2\,s ($10.5\times$), so the overall improvement widens from $2.5\times$ at SF1 to $8.8\times$ at SF8. The two series were measured on different machines and the optimised suite does not yet include the queries in \texttt{our\_opt} that are not synchronised into \texttt{final\_combined} (Q1, Q5, Q8, Q14, Q92, Q93 and Q96), so these factors indicate the trend rather than an exact like-for-like speedup.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.8\textwidth]{report/total_runtime_vs_sf.png}
+\caption{Total runtime of the 99 queries per scale factor (log scale). Baseline: historical \texttt{qmod\_combined} power test; optimised: \texttt{final\_combined}, median of warm runs 2--5 on the machine described in the methodology. The dashed line extrapolates the baseline linearly from SF1. The baselines of Q4, Q11, Q72 and Q78 differ semantically from the original queries (Section~\ref{sec:important_notice}).}
+\label{fig:total_runtime}
+\end{figure}
+
+\subsection{Per-Query Execution Time}
+
+Figures~\ref{fig:query_times_sf1}--\ref{fig:query_times_sf8} show every query at each scale factor, ordered by its baseline runtime. Each vertical segment connects the baseline (blue) and optimised (orange) runtime of one query. A few slow queries dominate the workload: the five slowest baseline queries account for 50--67\% of the total baseline runtime at every scale factor. The largest absolute gain is Q72 at every scale factor (5,404.4\,s to 25.1\,s at SF8); at SF8 it is followed by Q13 (715.5\,s to 5.7\,s) and Q73 (597.2\,s to 1.2\,s). Queries that were not rewritten also differ between the two series because of the different hardware, and between two and eight queries per scale factor are slower in the optimised run (for example Q41 and Q62 at SF8).
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{report/query_times_sf1.png}
+\caption{Per-query runtime at SF1 (log scale), baseline (blue) versus optimised (orange), ordered by baseline runtime.}
+\label{fig:query_times_sf1}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{report/query_times_sf2.png}
+\caption{Per-query runtime at SF2 (log scale), baseline (blue) versus optimised (orange), ordered by baseline runtime.}
+\label{fig:query_times_sf2}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{report/query_times_sf4.png}
+\caption{Per-query runtime at SF4 (log scale), baseline (blue) versus optimised (orange), ordered by baseline runtime.}
+\label{fig:query_times_sf4}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{report/query_times_sf8.png}
+\caption{Per-query runtime at SF8 (log scale), baseline (blue) versus optimised (orange), ordered by baseline runtime.}
+\label{fig:query_times_sf8}
+\end{figure}
+
 \section{Group A: Early Surrogate-Key Aggregation Before Dimension and Self-Joins (Law I + Law III)}
 
 Queries in Group A (Q4, Q11, Q21, Q47, Q50, Q74, Q81) aggregate large fact tables (\texttt{store\_sales}, \texttt{catalog\_sales}, \texttt{web\_sales}, \texttt{catalog\_returns}, \texttt{inventory}) by string-valued dimension attributes (\texttt{customer}, \texttt{item}, \texttt{store}, \texttt{warehouse}), or self-join multi-year CTEs on string natural keys. By applying \textbf{Law I} (grouping fact rows by integer surrogate keys before joining dimensions) and \textbf{Law III} (driving from small, materialised \texttt{date\_dim} CTEs into fact-table indexes via \texttt{STRAIGHT\_JOIN}), we remove wide-string temporary tables, redundant self-joins and statistics-dependent plan choices.
 
 \paragraph{Refinement of Law I.} Pushing the aggregation below the dimension join is only lossless when the outer grouping attributes are functionally determined by the surrogate key \emph{and} the query still groups by those attributes afterwards. In the TPC-DS data this cannot be taken for granted: \texttt{c\_customer\_id} is unique per \texttt{c\_customer\_sk}, but \texttt{item}, \texttt{store} and \texttt{warehouse} are slowly changing dimensions. At SF1, 18,000 item keys map to only 9,000 values of \texttt{i\_item\_id}, 12 stores share 8 store names and 5 warehouses share 4 names. Whenever a query groups by such attributes, our rewrites therefore aggregate by surrogate keys first and then \emph{re-aggregate} by the original attributes after the dimension join. This is exact for distributive aggregates: $\text{SUM}(\text{SUM}(x))$ equals $\text{SUM}(x)$, including returning \texttt{NULL} only when all inputs are \texttt{NULL}.
 
-\paragraph{Corrected baseline for Q4 and Q11.} The inherited \texttt{qmod\_combined} versions of Q4 and Q11 did not preserve the original queries: Q4 compared absolute 2001 totals instead of the 2001$\rightarrow$2002 growth ratios of the three channels, and both returned \texttt{customer\_birth\_country} instead of \texttt{customer\_login}. On SF1 the inherited Q4 returns 245 rows, whereas the original returns 8. We replaced both with the MySQL-compatible original queries (which differ from \texttt{orig} only in whitespace); the historical Q4 and Q11 timings refer to the incorrect queries and are not used here.
+\paragraph{Baseline of Q4 and Q11.} The inherited \texttt{qmod\_combined} versions of Q4 and Q11 did not preserve the original queries: Q4 compared absolute 2001 totals instead of the 2001$\rightarrow$2002 growth ratios of the three channels, and both returned \texttt{customer\_birth\_country} instead of \texttt{customer\_login}. On SF1 the inherited Q4 returns 245 rows, whereas the original returns 8. Our optimised Q4 and Q11 implement the original semantics. Following the decision in Section~\ref{sec:important_notice}, the benchmark results below still compare them with the inherited baseline (marked with $^\dagger$). This understates their gain, because the original queries are considerably slower than the inherited ones: against the original queries, measured on our local instance, Q4 is $16.7\times$ (SF1) and $19.3\times$ (SF2) faster and Q11 $16.7\times$ and $17.3\times$.
 
-\paragraph{Experimental setup and correctness.} All Group A measurements were taken on one machine (Apple M4, 10 cores, 24\,GiB RAM, MySQL 8.4.13, 6\,GiB InnoDB buffer pool) on SF1 (4.34\,GB including indexes) and SF2 (7.59\,GB, larger than the buffer pool). Each query was executed once as a warm-up and then timed; we report the median of three such runs, including the time to fetch all rows. Correctness was verified by executing the baseline and the optimised query with the trailing \texttt{LIMIT} removed and comparing the complete result sets (exact comparison of decimals and strings, relative tolerance $10^{-9}$ for floating-point aggregates). All seven queries return identical results, in the same order, on SF1 and SF2.
+\paragraph{Measurements and correctness.} All timings in the tables of this section come from the full benchmark (Section~\ref{sec:benchmark}): the historical baseline power test and the optimised suite measured as described in Section~\ref{sec:methodology}, at SF1, SF2, SF4 and SF8. As noted there, the two series were measured on different machines. The execution plans and the local measurements quoted in the text were obtained on a separate local instance (Apple M4, 10 cores, 24\,GiB RAM, MySQL 8.4.13, 6\,GiB InnoDB buffer pool) at SF1 (4.34\,GB including indexes) and SF2 (7.59\,GB). On this instance, correctness was verified by executing each optimised query and its baseline (the original query for Q4 and Q11) with the trailing \texttt{LIMIT} removed and comparing the complete result sets (exact comparison of decimals and strings, relative tolerance $10^{-9}$ for floating-point aggregates). All seven queries return identical results, in the same order, on SF1 and SF2.
 
 \subsection{Group A Performance Summary}
-Table~\ref{tab:group_a_results} reports the speedup of each optimised query over the baseline and Table~\ref{tab:group_a_times} the underlying execution times. Measurements on SF4 and SF8 are pending.
+Table~\ref{tab:group_a_results} reports the speedup of each optimised query over the baseline at every scale factor and Table~\ref{tab:group_a_times} the underlying execution times. The Total column is the ratio of the runtimes summed over the four scale factors.
 
 \begin{table}[htbp]
 \centering
@@ -87,41 +180,48 @@ Table~\ref{tab:group_a_results} reports the speedup of each optimised query over
 \begin{tabular}{@{}lrrrrr@{}}
 \toprule
 \textbf{Query} & \textbf{SF1 ($\times$)} & \textbf{SF2 ($\times$)} & \textbf{SF4 ($\times$)} & \textbf{SF8 ($\times$)} & \textbf{Total ($\times$)} \\ \midrule
-Query 4  & 16.7 & 19.3 & -- & -- & -- \\
-Query 11 & 16.7 & 17.3 & -- & -- & -- \\
-Query 21 & 2.4 & 133.1 & -- & -- & -- \\
-Query 47 & 5.0 & 5.9 & -- & -- & -- \\
-Query 50 & 1.4 & 1.6 & -- & -- & -- \\
-Query 74 & 5.8 & 6.5 & -- & -- & -- \\
-Query 81 & 20.3 & 40.0 & -- & -- & -- \\ \midrule
-\textbf{Group A Total} & \textbf{11.7} & \textbf{14.9} & \textbf{--} & \textbf{--} & \textbf{--} \\ \bottomrule
+Query 4$^\dagger$ & 3.9 & 4.6 & 5.4 & 7.6 & 6.5 \\
+Query 11$^\dagger$ & 7.6 & 9.5 & 9.8 & 12.8 & 11.3 \\
+Query 21 & 3.0 & 378.8 & 447.8 & 540.3 & 453.5 \\
+Query 47 & 5.2 & 5.2 & 4.6 & 40.7 & 24.5 \\
+Query 50 & 2.3 & 3.0 & 3.3 & 825.4 & 418.8 \\
+Query 74 & 5.5 & 5.7 & 7.6 & 12.3 & 9.9 \\
+Query 81 & 16.3 & 34.5 & 56.8 & 707.3 & 425.9 \\ \midrule
+\textbf{Group A Total} & \textbf{5.5} & \textbf{10.3} & \textbf{11.7} & \textbf{29.8} & \textbf{21.3} \\ \bottomrule
 \end{tabular}
+
+\smallskip
+{\footnotesize $^\dagger$\,The baseline is the inherited version, which differs semantically from the original query (Section~\ref{sec:important_notice}).}
 \end{table}
 
 \begin{table}[htbp]
 \centering
-\caption{Group A Execution Times in Seconds (Median of Three Warm Runs)}
+\caption{Group A Execution Times in Seconds (Baseline: Historical Power Test; Optimised: Median of Warm Runs 2--5)}
 \label{tab:group_a_times}
-\begin{tabular}{@{}lrrrr@{}}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrrrrrr@{}}
 \toprule
-\textbf{Query} & \textbf{SF1 Baseline} & \textbf{SF1 Optimised} & \textbf{SF2 Baseline} & \textbf{SF2 Optimised} \\ \midrule
-Query 4  & 50.954 & 3.053 & 112.460 & 5.821 \\
-Query 11 & 35.522 & 2.128 & 71.957 & 4.150 \\
-Query 21 & 0.337 & 0.142 & 25.189 & 0.189 \\
-Query 47 & 9.365 & 1.884 & 18.915 & 3.219 \\
-Query 50 & 0.032 & 0.023 & 0.050 & 0.032 \\
-Query 74 & 11.797 & 2.048 & 25.602 & 3.923 \\
-Query 81 & 1.981 & 0.098 & 7.012 & 0.175 \\ \midrule
-\textbf{Total} & \textbf{110.0} & \textbf{9.4} & \textbf{261.2} & \textbf{17.5} \\ \bottomrule
+ & \multicolumn{2}{c}{\textbf{SF1}} & \multicolumn{2}{c}{\textbf{SF2}} & \multicolumn{2}{c}{\textbf{SF4}} & \multicolumn{2}{c}{\textbf{SF8}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7} \cmidrule(l){8-9}
+\textbf{Query} & Base & Opt. & Base & Opt. & Base & Opt. & Base & Opt. \\ \midrule
+Query 4$^\dagger$ & 8.552 & 2.180 & 21.343 & 4.657 & 56.468 & 10.378 & 168.987 & 22.230 \\
+Query 11$^\dagger$ & 11.083 & 1.463 & 29.806 & 3.139 & 68.362 & 6.969 & 188.193 & 14.741 \\
+Query 21 & 0.297 & 0.098 & 53.311 & 0.141 & 131.456 & 0.294 & 351.510 & 0.651 \\
+Query 47 & 5.951 & 1.144 & 12.297 & 2.369 & 23.083 & 5.035 & 421.747 & 10.354 \\
+Query 50 & 0.039 & 0.017 & 0.077 & 0.026 & 0.154 & 0.047 & 75.806 & 0.092 \\
+Query 74 & 7.999 & 1.445 & 17.868 & 3.141 & 52.725 & 6.907 & 184.086 & 14.987 \\
+Query 81 & 1.201 & 0.074 & 4.989 & 0.144 & 17.720 & 0.312 & 507.146 & 0.717 \\ \midrule
+\textbf{Total} & \textbf{35.12} & \textbf{6.42} & \textbf{139.69} & \textbf{13.62} & \textbf{349.97} & \textbf{29.94} & \textbf{1897.47} & \textbf{63.77} \\ \bottomrule
 \end{tabular}
 \end{table}
 
-From SF1 to SF2 the summed baseline runtime grows by $2.37\times$, whereas the optimised queries grow by $1.86\times$. The group totals are dominated by Q4 and Q11, while the largest single improvement is Q21, discussed next.
+From SF1 to SF8 the summed baseline runtime of the group grows by $54.0\times$, whereas the optimised queries grow by $9.9\times$, roughly in proportion to the eightfold increase in data. The group speedup therefore widens from $5.5\times$ at SF1 to $29.8\times$ at SF8 ($21.3\times$ over all four scale factors). The largest gains come from queries whose baseline degrades super-linearly: Q21 from SF2 onwards (discussed next), and Q47, Q50 and Q81 at SF8, where the optimised versions are $40.7\times$, $825.4\times$ and $707.3\times$ faster. Q4, Q11 and Q74 improve by $3.9\times$ to $12.8\times$; for Q4 and Q11 these factors are measured against the inherited baseline.
 
 \subsection{Group A Highlight: Query 21 Optimization}
 
 \subsubsection{Baseline Execution Plan and Bottleneck Analysis}
-Query 21 compares, per warehouse and item, the inventory on hand in the 30 days before and after 2002-03-20 for items priced between 0.99 and 1.49. In the baseline (\texttt{qmod\_combined/query21.sql}) it takes only 0.34\,s on SF1 but 25.19\,s on SF2: a $74.7\times$ slowdown for twice the data. The historical results of the full workload show the same jump (0.30\,s on SF1, 53.31\,s on SF2). The cause is a plan flip between the two scale factors.
+Query 21 compares, per warehouse and item, the inventory on hand in the 30 days before and after 2002-03-20 for items priced between 0.99 and 1.49. In the full benchmark the baseline (\texttt{qmod\_combined/query21.sql}) takes only 0.30\,s on SF1 but 53.31\,s on SF2, a slowdown of about $180\times$ for twice the data, and 351.51\,s on SF8. We reproduced the jump on our local instance (0.34\,s on SF1, 25.19\,s on SF2), on which the execution plans below were captured. The cause is a plan flip between the two scale factors.
 
 On SF1 (Listing~\ref{lst:q21_explain_sf1}) MySQL drives from the 61 qualifying \texttt{date\_dim} rows into the left prefix \texttt{inv\_date\_sk} of the \texttt{inventory} primary key \texttt{(inv\_date\_sk, inv\_item\_sk, inv\_warehouse\_sk)}, so only the weekly inventory snapshots inside the window are read.
 
@@ -214,7 +314,7 @@ WHERE (CASE WHEN inv_before > 0 THEN inv_after / inv_before ELSE NULL END)
 \end{lstlisting}
 \end{enumerate}
 
-Listing~\ref{lst:q21_explain_opt} shows the optimised plan on SF2: the date window drives into the \texttt{inventory} primary key, and \texttt{warehouse} and \texttt{item} are only probed once per aggregated key pair. The runtime on SF2 drops from 25.19\,s to 0.19\,s ($133.1\times$), and the optimised query grows only from 0.14\,s to 0.19\,s between SF1 and SF2.
+Listing~\ref{lst:q21_explain_opt} shows the optimised plan on SF2: the date window drives into the \texttt{inventory} primary key, and \texttt{warehouse} and \texttt{item} are only probed once per aggregated key pair. On the local instance the runtime on SF2 drops from 25.19\,s to 0.19\,s ($133.1\times$).
 
 \begin{lstlisting}[caption={Optimised \texttt{EXPLAIN FORMAT=TREE} on SF2 for Query 21 (top of plan omitted)}, label={lst:q21_explain_opt}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
 -> Aggregate using temporary table
@@ -235,15 +335,24 @@ Listing~\ref{lst:q21_explain_opt} shows the optimised plan on SF2: the date wind
             -> Single-row index lookup on item using PRIMARY (i_item_sk=t.inv_item_sk)  (cost=0.25 rows=1)
 \end{lstlisting}
 
+Figure~\ref{fig:highlight_q21} places Q21 in the full benchmark across all four scale factors, comparing the historical baseline with the optimised suite. The baseline jumps from 0.30\,s at SF1 to 53.31\,s at SF2 and reaches 351.51\,s at SF8, whereas the optimised query grows smoothly from 0.10\,s to 0.65\,s, about $540\times$ faster at SF8. As for the totals, the two series come from different machines.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.7\textwidth]{report/highlight_q21.png}
+\caption{Query 21 runtime per scale factor (log scale). Baseline: historical \texttt{qmod\_combined} power test; optimised: \texttt{final\_combined}, median of warm runs 2--5.}
+\label{fig:highlight_q21}
+\end{figure}
+
 \subsection{Other Group A Queries}
 
-\paragraph{Q4, Q11 and Q74: single-pass year pivot.} The baseline materialises a CTE that aggregates every sales channel by seven customer string columns and year (over all years for Q4 and Q11) and then self-joins it four times (six for Q4) on the string \texttt{customer\_id}. The rewrite scans each channel once, driven from the two target years of \texttt{date\_dim} through the sold-date foreign-key index (Law III), and groups by the integer customer key, computing both years with conditional aggregates such as \texttt{SUM(CASE WHEN d\_year = 2001 THEN ... END)} (Law I). The channels are then joined on \texttt{customer\_sk}, and \texttt{customer} is joined once for the output columns. Omitting the \texttt{ELSE} branch keeps a year whose values are all \texttt{NULL} at \texttt{NULL}, and a per-year \texttt{COUNT} preserves the requirement of the original self-joins that the customer has rows in both years. \texttt{STDDEV\_SAMP} in Q74 cannot be merged from partial results, but each (customer, year) group is still computed in a single aggregation. The speedups on SF2 are $19.3\times$ (Q4), $17.3\times$ (Q11) and $6.5\times$ (Q74).
+\paragraph{Q4, Q11 and Q74: single-pass year pivot.} The baseline materialises a CTE that aggregates every sales channel by seven customer string columns and year (over all years for Q4 and Q11) and then self-joins it four times (six for Q4) on the string \texttt{customer\_id}. The rewrite scans each channel once, driven from the two target years of \texttt{date\_dim} through the sold-date foreign-key index (Law III), and groups by the integer customer key, computing both years with conditional aggregates such as \texttt{SUM(CASE WHEN d\_year = 2001 THEN ... END)} (Law I). The channels are then joined on \texttt{customer\_sk}, and \texttt{customer} is joined once for the output columns. Omitting the \texttt{ELSE} branch keeps a year whose values are all \texttt{NULL} at \texttt{NULL}, and a per-year \texttt{COUNT} preserves the requirement of the original self-joins that the customer has rows in both years. \texttt{STDDEV\_SAMP} in Q74 cannot be merged from partial results, but each (customer, year) group is still computed in a single aggregation. In the full benchmark Q74 is $5.5\times$ (SF1) to $12.3\times$ (SF8) faster; for Q4 and Q11, see the note on their baseline at the beginning of this section.
 
-\paragraph{Q47: integer group identifiers and window functions.} A first attempt that pre-aggregated \texttt{store\_sales} by \texttt{(ss\_item\_sk, ss\_store\_sk, month)} gained only about $1.5\times$: on SF2 this key barely reduced the rows (1.34M to 0.96M), and the second aggregation by the string attributes added another full pass. Law I only pays off when the surrogate-key grouping is clearly coarser than the original grouping. The final version maps \texttt{(i\_category, i\_brand)} and \texttt{(s\_store\_name, s\_company\_name)} to integer group identifiers with \texttt{DENSE\_RANK} (which, like \texttt{GROUP BY}, compares strings by collation), aggregates \texttt{store\_sales} once by these integers directly into 76k groups, and replaces the three-way self-join for the previous and next month with \texttt{LAG}/\texttt{LEAD}. Since the original self-join uses equality predicates that never match \texttt{NULL}, partitions with a \texttt{NULL} category, brand, store or company name are excluded in the rewrite as well. The speedup is $5.0\times$ on SF1 and $5.9\times$ on SF2.
+\paragraph{Q47: integer group identifiers and window functions.} A first attempt that pre-aggregated \texttt{store\_sales} by \texttt{(ss\_item\_sk, ss\_store\_sk, month)} gained only about $1.5\times$ on our local SF2 instance: this key barely reduced the rows (1.34M to 0.96M), and the second aggregation by the string attributes added another full pass. Law I only pays off when the surrogate-key grouping is clearly coarser than the original grouping. The final version maps \texttt{(i\_category, i\_brand)} and \texttt{(s\_store\_name, s\_company\_name)} to integer group identifiers with \texttt{DENSE\_RANK} (which, like \texttt{GROUP BY}, compares strings by collation), aggregates \texttt{store\_sales} once by these integers directly into 76k groups, and replaces the three-way self-join for the previous and next month with \texttt{LAG}/\texttt{LEAD}. Since the original self-join uses equality predicates that never match \texttt{NULL}, partitions with a \texttt{NULL} category, brand, store or company name are excluded in the rewrite as well. In the full benchmark it is $4.6\times$ to $5.2\times$ faster up to SF4 and $40.7\times$ at SF8, where the baseline degrades from 23.08\,s (SF4) to 421.75\,s.
 
-\paragraph{Q50: fixed return-driven plan.} Q50 is already fast on SF1 and SF2 (0.03--0.05\,s); its historical degradation (0.15\,s on SF4, 75.81\,s on SF8) only appears at SF8. The rewrite fixes the access path from the 31 days of August 2001 into \texttt{store\_returns} through its returned-date index and into \texttt{store\_sales} through its primary key \texttt{(ss\_item\_sk, ss\_ticket\_number)}, counts the return intervals per \texttt{ss\_store\_sk} and only then re-aggregates by the ten store attributes. Its benefit is expected at SF8 and remains to be measured.
+\paragraph{Q50: fixed return-driven plan.} In the baseline Q50 takes at most 0.15\,s up to SF4 but 75.81\,s at SF8. The rewrite fixes the access path from the 31 days of August 2001 into \texttt{store\_returns} through its returned-date index and into \texttt{store\_sales} through its primary key \texttt{(ss\_item\_sk, ss\_ticket\_number)}, counts the return intervals per \texttt{ss\_store\_sk} and only then re-aggregates by the ten store attributes. The full benchmark confirms the benefit at SF8: the optimised query grows smoothly to 0.09\,s, $825.4\times$ faster than the baseline.
 
-\paragraph{Q81: decorrelated per-state threshold.} The baseline evaluates the average return per state as a dependent subquery, rescanning the matching CTE rows for every outer row, so its cost grows roughly quadratically with the data (17.72\,s on SF4, 507.15\,s on SF8 in the historical results). The rewrite materialises the per-customer returns once, driven from the 2002 dates through the \texttt{catalog\_returns} returned-date index, pre-aggregates the threshold $1.2 \times \text{AVG}$ per state (Law I) and joins it on the state. A \texttt{NULL} state matches neither the original predicate nor the join. The outer filter on \texttt{ca\_state = 'NH'} cannot be pushed into the CTE, because it refers to the customer's current address and not to the address of the return. The speedup is $20.3\times$ on SF1 and $40.0\times$ on SF2.
+\paragraph{Q81: decorrelated per-state threshold.} The baseline evaluates the average return per state as a dependent subquery, rescanning the matching CTE rows for every outer row, so its cost grows roughly quadratically with the data (17.72\,s on SF4, 507.15\,s on SF8). The rewrite materialises the per-customer returns once, driven from the 2002 dates through the \texttt{catalog\_returns} returned-date index, pre-aggregates the threshold $1.2 \times \text{AVG}$ per state (Law I) and joins it on the state. A \texttt{NULL} state matches neither the original predicate nor the join. The outer filter on \texttt{ca\_state = 'NH'} cannot be pushed into the CTE, because it refers to the customer's current address and not to the address of the return. In the full benchmark the speedup grows from $16.3\times$ at SF1 to $707.3\times$ at SF8 (0.72\,s).
 
 \section{Group B: Fact-to-Fact Multi-Way Joins and Composite Primary Key Lookups (Law I + Law III)}
 
@@ -592,5 +701,13 @@ The baseline Query 13 is the second-longest query at SF8, but SF8 execution tree
 \begin{lstlisting}[caption={Optimized Query 13 \texttt{EXPLAIN ANALYZE} tree on SF8 (pending)}, label={lst:q13_explain_opt_sf8}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
 [SF8 optimized execution tree pending collection]
 \end{lstlisting}
+
+\section{Other Optimisations}
+
+\textit{[TODO (Neha): optimisations of queries outside groups A, B and C.]}
+
+\chapter{Conclusion}
+
+\textit{[TODO (Neha): conclusion.]}
 
 \end{document}
