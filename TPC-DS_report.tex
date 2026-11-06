@@ -32,7 +32,40 @@ This project was carried out by the team members, who designed the benchmark met
 
 \section{TPC-DS}
 
-\textit{[TODO (Neha): the TPC-DS benchmark, its schema, data generator and query workload.]}
+TPC-DS (Transaction Processing Performance Council Decision Support) is the industry standard for evaluating decision support systems (DSS) and Big Data engines. Unlike synthetic benchmarks that test isolated database primitives, TPC-DS models the holistic analytical operations of a multi-channel retail business (Store, Web, and Catalog sales).
+
+\subsubsection{The Multi-Channel Star Schema and Snowflaking}
+
+The TPC-DS schema consists of 24 tables arranged primarily as a set of interconnected Star Schemas and selective Snowflake Schemas:
+
+\begin{itemize}
+    \item \textbf{Fact Tables (7):}
+        \begin{itemize}
+            \item store\_sales, store\_returns
+            \item catalog\_sales, catalog\_returns
+            \item web\_sales, web\_returns
+            \item inventory (snapshot fact table)
+        \end{itemize}
+    \item \textbf{Dimension Tables (17):}
+        \begin{itemize}
+            \item \textbf{Core Shared Dimensions:} date\_dim, time\_dim, item, customer, customer\_address, promotion, warehouse.
+            \item \textbf{Demographic Dimensions:} customer\_demographics, household\_demographics, income\_band.
+            \item \textbf{Channel Dimensions:} store, web\_site, web\_page, call\_center, catalog\_page.
+        \end{itemize}
+\end{itemize}
+
+\subsubsection{Data Characteristics and Complexity}
+
+\begin{itemize}
+    \item \textbf{Data Skew:} Real-world retail datasets exhibit non-uniform distributions (e.g., peak sales on weekends/holidays, high-frequency buyers vs. one-time customers). TPC-DS incorporates data skew across foreign keys, which tests how database query optimizers handle non-linear selectivity.
+    \item \textbf{Slowly Changing Dimensions:} Dimensions like item and customer maintain historical versions across time using effective date ranges, forcing queries to join on both surrogate keys and date ranges.
+    \item \textbf{Data Maintenance Operations:} In addition to read-only queries, TPC-DS benchmarks data maintenance via concurrent refresh streams:
+    \begin{itemize}
+        \item \textbf{Insert Stream:} Ingesting new staging data (s\_store\_sales, etc.).
+        \item \textbf{Delete Stream:} Removing expired date ranges from core fact tables based on surrogate key lookups (ss\_sold\_date\_sk).
+    \end{itemize}
+\end{itemize}
+
 
 \section{MySQL}
 
