@@ -14,7 +14,7 @@
 	title={Assignment 1},
 	studies={2026 - 2027},
 	course={INFO-H419 - Data Warehouses},
-	author={Oliver Irvine\\ Jianli Zhao\\ Sagar Singh\\ Neha},
+	author={Oliver Irvine\\ Jianli Zhao\\ Sagar Singh\\ Neha Chaudhary},
 	date={November 2026},
 	teacher={Esteban Zimányi},
 	logo={Pictures/logo-polytech.jpg},
@@ -29,6 +29,10 @@
 This project was carried out by the team members, who designed the benchmark methodology, selected and analysed the queries, made all optimisation decisions and interpreted the results. AI tools (large language model assistants) were used in a supporting role: mainly to help write and debug code, such as the benchmark and analysis scripts, and to a lesser extent to help edit parts of the report text. All AI-assisted output was reviewed and verified by the team. Every optimised query was checked against its baseline by comparing complete result sets, all reported measurements come from our own benchmark runs, and the team takes full responsibility for the content of this report.
 
 \chapter{Background}
+
+\section{Project Overview}
+
+This report presents Part I of the course data-warehouse project: implementing and evaluating the TPC-DS decision-support benchmark on MySQL 8.0. We run the benchmark at scale factors 1, 2, 4, and 8 to study how query performance changes as the dataset grows. Our objectives are to identify bottlenecks in MySQL's execution of analytical queries and to evaluate query-rewriting and execution-plan strategies for improving runtimes. The scope of this report is the TPC-DS workload and its performance on MySQL; the course project's separate TPC-DI part is outside its scope.
 
 \section{TPC-DS}
 
