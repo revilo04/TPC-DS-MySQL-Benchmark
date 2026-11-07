@@ -14,7 +14,7 @@
 	title={Assignment 1},
 	studies={2026 - 2027},
 	course={INFO-H419 - Data Warehouses},
-	author={Oliver Irvine\\ Jianli Zhao\\ Sager Singh\\ Neha},
+	author={Oliver Irvine\\ Jianli Zhao\\ Sagar Singh\\ Neha},
 	date={November 2026},
 	teacher={Esteban Zimányi},
 	logo={Pictures/logo-polytech.jpg},
@@ -389,7 +389,7 @@ Figure~\ref{fig:highlight_q21} places Q21 in the full benchmark across all four 
 
 \section{Group B: Fact-to-Fact Multi-Way Joins and Composite Primary Key Lookups (Law I + Law III)}
 
-Queries in Group B join two to six fact tables together (e.g., \texttt{catalog\_sales} with \texttt{inventory}, or \texttt{store\_sales} with \texttt{store\_returns} and \texttt{catalog\_sales}) across multiple \texttt{date\_dim} aliases. Without intervention, MySQL joins the massive fact tables before filtering by dates or fails to utilise the left-prefix of InnoDB's composite primary keys, causing severe intermediate row explosions.
+Queries in Group B join two to six fact tables together (e.g., \texttt{catalog\_sales} with \texttt{inventory}, or \texttt{store\_sales} with \texttt{store\_returns} and \texttt{catalog\_sales}) across multiple \texttt{date\_dim} aliases. Without intervention, MySQL joins the massive fact tables before filtering by dates or fails to utilise the left-prefix of InnoDB's composite primary keys, causing severe intermediate row explosions. In our baseline, the following 6 queries accounted for 42.7\% of total execution time across all 4 SFs.
 
 \subsection{Group B Performance Summary}
 Table~\ref{tab:group_b_results} reports the speedup factors achieved over the baseline across all four scale factors for Group B queries.
@@ -401,13 +401,13 @@ Table~\ref{tab:group_b_results} reports the speedup factors achieved over the ba
 \begin{tabular}{@{}lrrrrr@{}}
 \toprule
 \textbf{Query} & \textbf{SF1 ($\times$)} & \textbf{SF2 ($\times$)} & \textbf{SF4 ($\times$)} & \textbf{SF8 ($\times$)} & \textbf{Total ($\times$)} \\ \midrule
-Query 17 & -- & -- & -- & -- & -- \\
-Query 25 & -- & -- & -- & -- & -- \\
-Query 29 & -- & -- & -- & -- & -- \\
-Query 72 & $21.91\times$ & $92.98\times$ & $80.82\times$ & $142.30\times$ & -- \\
-Query 77 & -- & -- & -- & -- & -- \\
-Query 80 & -- & -- & -- & -- & -- \\ \midrule
-\textbf{Group B Total / Average} & \textbf{--} & \textbf{--} & \textbf{--} & \textbf{--} & \textbf{--} \\ \bottomrule
+Query 17 & $3.64\times$& $5.24\times$& 9.49$\times$& $23.38\times$& $20.46\times$\\
+Query 25 & $4.64\times$& $4.10\times$& $5.30\times$& $91.97\times$& $58.15\times$\\
+Query 29 & $2.97\times$& $3.77\times$& $4.71\times$& $115.15\times$& $65.74\times$\\
+Query 72 & $62.88\times$& $178.34\times$& $202.24\times$& $214.49\times$& $201.50\times$\\
+Query 77 & $39.55\times$& $44.22\times$& $52.88\times$& $139.23\times$& $100.73\times$\\
+Query 80 & $28.06\times$& $31.41\times$& $30.80\times$& $93.14\times$& $66.80\times$\\ \midrule
+\textbf{Group B Total }& $52.68\times$& $144.69\times$& $163.94\times$& $181.93\times$& $168.60\times$\\ \bottomrule
 \end{tabular}
 \end{table}
 
@@ -448,7 +448,7 @@ Listing~\ref{lst:q72_explain_bad} shows the \texttt{EXPLAIN FORMAT=TREE} on SF8 
 \end{lstlisting}
 
 \subsubsection{Precise Application of Optimization Laws in SQL}
-We applied \textbf{Law I} and \textbf{Law III} to Query 72 as follows:
+We applied **Law I** and **Law III** to Query 72 as follows:
 \begin{enumerate}
     \item \textbf{Application of Law I (Distributive Pre-Aggregation of \texttt{catalog\_sales}):} Any two \texttt{catalog\_sales} rows in the same week that share $(\texttt{cs\_item\_sk}, \texttt{d\_week\_seq}, \texttt{cs\_quantity})$ match the exact same set of \texttt{inventory} records under $(\texttt{cs\_item\_sk} = \texttt{inv\_item\_sk} \land \texttt{d1.d\_week\_seq} = \texttt{d2.d\_week\_seq} \land \texttt{inv\_quantity\_on\_hand} < \texttt{cs\_quantity})$. Pre-grouping \texttt{filtered\_cs} by these three integer columns collapses duplicate item-week-quantity sales before probing \texttt{inventory}, and delays joining the wide \texttt{item} (\texttt{VARCHAR(200)}) and \texttt{warehouse} strings until after the fact join.
 
@@ -503,7 +503,7 @@ STRAIGHT_JOIN item i ON i.i_item_sk = cs.cs_item_sk
 \end{lstlisting}
 \end{enumerate}
 
-Listing~\ref{lst:q72_explain_good} shows the resulting \texttt{EXPLAIN FORMAT=TREE} on SF8, confirming that \texttt{filtered\_cs} is materialised via foreign-key index \texttt{cs\_d2} and that \texttt{inventory} is probed via its 2-column composite primary key (\texttt{inv\_date\_sk = d2.d\_date\_sk, inv\_item\_sk = cs.cs\_item\_sk}, \texttt{rows=8.08}), reducing SF8 execution time from \textbf{5,404.38s to 37.98s} ($142.30\times$ speedup).
+Listing~\ref{lst:q72_explain_good} shows the resulting \texttt{EXPLAIN FORMAT=TREE} on SF8, confirming that \texttt{filtered\_cs} is materialised via foreign-key index \texttt{cs\_d2} and that \texttt{inventory} is probed via its 2-column composite primary key (\texttt{inv\_date\_sk = d2.d\_date\_sk, inv\_item\_sk = cs.cs\_item\_sk}, \texttt{rows=8.08}), reducing SF8 execution time from \textbf{5,404.38s to 25.19s} ($214.49\times$ speedup).
 
 \begin{lstlisting}[caption={Optimized \texttt{EXPLAIN FORMAT=TREE} on SF8 for Query 72}, label={lst:q72_explain_good}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
 -> Limit: 100 row(s)
@@ -531,10 +531,51 @@ Listing~\ref{lst:q72_explain_good} shows the resulting \texttt{EXPLAIN FORMAT=TR
                                     -> Hash (Constant row from EXISTS subqueries)
                                 -> Index lookup on d2 using <auto_key0> (d_week_seq = cs.d_week_seq) (Materialize CTE d2_2002)
                             -> Filter: (inv.inv_quantity_on_hand < cs.cs_quantity)  (cost=1.01 rows=2.69)
-                                -> Index lookup on inv using PRIMARY (inv_date_sk = d2.d_date_sk, inv_item_sk = cs.cs_item_sk)  (cost=1.01 rows=8.08)
+                                -> Index lookup on inv using PRIMARY (inv_date_sk = d2.d_date_sk, inv_item\_sk = cs.cs_item_sk)  (cost=1.01 rows=8.08)
                         -> Single-row index lookup on w using PRIMARY (w_warehouse_sk = inv.inv_warehouse_sk)
                     -> Single-row index lookup on i using PRIMARY (i_item_sk = cs.cs_item_sk)
 \end{lstlisting}
+
+\subsubsection{Results}
+
+
+\begin{figure}[htbp]
+    
+        \centering
+        \includegraphics[width=0.85\linewidth]{q72_runtime_linear.png}
+        \caption{Linear runtime scale.}
+        \label{fig:runtime_linear}
+\end{figure}
+\begin{figure}[htbp]
+        \centering
+        \includegraphics[width=0.85\linewidth]{q72_runtime_log.png}
+        \caption{Log runtime scale.}
+        \label{fig:runtime_log}
+\end{figure}
+
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\linewidth]{q72_scaleup_cumulative.png}
+    \caption{Cumulative scaleup performance.}
+    \label{fig:scaleup_cumulative}
+\end{figure}
+
+\newpage
+\subsection{Other queries}
+This section serves to briefly demonstrate the changes made on the other queries that are part of Group B
+\subsubsection{Query 17}
+Baseline Query 17 joins 3 fact tables (\texttt{store\_sales, store\_returns, catalog\_sales}) with 3 date tables (d1, d2, d3), store, and item. Between SF4 (3.88s) and SF8 (73.71s), MySQL's optimizer flips the join order and groups by wide string attributes (\texttt{i\_item\_id, i\_item\_desc, s\_state}) across all joined rows. Using \textbf{Law I} and \textbf{Law III}, we materialize d1 (2002Q1) and d23 (2002Q1–Q3), drive via \texttt{STRAIGHT\_JOIN} from \texttt{d1 → store\_sales (ss\_d1 index) → store\_returns (via composite PK sr\_item\_sk, sr\_ticket\_number) → d2 → catalog\_sales (via PK prefix cs\_item\_sk + cs\_bill\_customer\_sk) → d3}, and join \texttt{item} and \texttt{store} only at the end.
+\subsubsection{Query 25}
+Query 25 joins 3 fact tables (\texttt{store\_sales, store\_returns, catalog\_sales}) with 3 date tables (\texttt{d1, d2, d3}), jumping 48.1x from SF4 (1.33s) to SF8 (63.92s). Using \textbf{Law I} and \textbf{Law III}, we materialize \texttt{d1} (April 2001, 30 days) and \texttt{d23} (Months 4--10 of 2001), drive via \texttt{STRAIGHT\_JOIN} from \texttt{d1 $\rightarrow$ store\_sales (ss\_d1 index) $\rightarrow$ store\_returns (via composite PK sr\_item\_sk, sr\_ticket\_number) $\rightarrow$ d2 $\rightarrow$ catalog\_sales (via PK prefix cs\_item\_sk) $\rightarrow$ d3}, and join store and item last.
+\subsubsection{Query 29}
+Query 29 joins 3 fact tables (\texttt{store\_sales, store\_returns, catalog\_sales}) with date tables, jumping 54.0x between SF4 (1.16s) and SF8 (62.66s). Using \textbf{Law I} and \textbf{Law III}, we materialize \texttt{d1} (April 2000), \texttt{d2} (Months 4--7 of 2000), and \texttt{d3} (Years 2000--2002), and drive via \texttt{STRAIGHT\_JOIN} from \texttt{d1 $\rightarrow$ store\_sales $\rightarrow$ store\_returns (via composite PK) $\rightarrow$ catalog\_sales (via PK prefix)}, completely eliminating the SF8 plan flip.
+\subsubsection{Query 77}
+Query 77 aggregates 6 separate fact tables (\texttt{store\_sales, store\_returns, catalog\_sales, catalog\_returns, web\_sales, web\_returns}) over a 31-day date window. Because the 6 CTEs do not materialize \texttt{date\_dim} with \texttt{/*+ NO\_MERGE() */} or enforce \texttt{STRAIGHT\_JOIN}, MySQL scans the fact tables instead of driving from the date keys. Using \textbf{Law I} and \textbf{Law III}, we materialize \texttt{filtered\_dates} once and drive all 6 fact aggregations via \texttt{STRAIGHT\_JOIN}, turning 6 full fact scans into 6 tiny 31-day index range lookups.
+\subsubsection{Query 80}
+Query 80 joins 3 sales fact tables (\texttt{store\_sales, catalog\_sales, web\_sales}) with their respective returns tables (\texttt{LEFT OUTER JOIN}) and repeatedly scans \texttt{date\_dim}, \texttt{item}, and \texttt{promotion} across 3 separate CTEs. Using \textbf{Law I} and \textbf{Law III}, we materialize \texttt{filtered\_dates} (31 days) once, drive into each sales fact table via its sold-date foreign key index, check item and promotion via Primary Key lookups before probing the returns table's composite Primary Key, and group by integer surrogate key before joining the channel dimension string IDs.
+
 
 \section{Group C: Disjunctive Predicate Pushdown and Star-Join Ordering (Law II + Law III)}
 
