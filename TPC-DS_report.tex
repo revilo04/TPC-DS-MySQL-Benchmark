@@ -276,7 +276,7 @@ All benchmarks were run on a MacBook Pro with an Apple M5 Pro chip and 24GB of u
 
 \section{Methodology}
 \label{sec:methodology}
-Following standard scientific principles in TPC-DS (CITE), we execute each query 5 times across each scalefactor (SF1, SF2, SF4, SF8). To isolate steady-state warm cache performance from cold-disk I/O, we treat Run 1 as a cache warmup run, and compute the mean, median and standard deviation across Runs 2 to 5. Between scale factors, MySQL is restarted to flush the InnoDB Buffer Pool. As our baseline, we used the queries from STUDENT REF repository.
+Following standard scientific principles in TPC-DS, we execute each query 5 times across each scalefactor (SF1, SF2, SF4, SF8). To isolate steady-state warm cache performance from cold-disk I/O, we treat Run 1 as a cache warmup run, and compute the mean, median and standard deviation across Runs 2 to 5. Between scale factors, MySQL is restarted to flush the InnoDB Buffer Pool. As our baseline, we used the queries from STUDENT REF repository.
 
 \section{Important Notice}
 \label{sec:important_notice}
