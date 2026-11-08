@@ -213,7 +213,7 @@ Accordingly, materialisation, join-order control, and index selection should be 
 \bottomrule
 \endfoot
 Law I: Distributive Aggregate Pushdown & 1. Early Aggregation & Aggregate fact-table rows before joining to reduce the volume of intermediate data. \\
- & 2. Surrogate-Key Grouping & Group by compact integer keys (\texttt{*_sk}) instead of wide descriptive attributes such as names and addresses. \\
+ & 2. Surrogate-Key Grouping & Group by compact integer keys (\texttt{*\_sk}) instead of wide descriptive attributes such as names and addresses. \\
  & 3. Distributive Aggregate Decomposition & Compute partial aggregates (\texttt{SUM}, \texttt{COUNT}) before the join and combine them afterward to preserve the final result. \\
  & 4. Functional-Dependency Preservation & Exploit the dependency from a unique dimension key to its descriptive attributes to defer retrieving those attributes until after aggregation. \\
 \addlinespace
@@ -261,7 +261,7 @@ After consultation with the professor, we have kept our optimisations that were 
 
 \subsection{Query Optimisation Trade-offs Across Scale Factors}
 
-The benefit of a query rewrite depends on how its additional work compares with the work it avoids as fact-table cardinalities grow. At a small scale factor, the fixed costs of materialising a common table expression, building a temporary result, or performing a second aggregation may be a substantial fraction of total execution time; at larger scale factors, avoiding repeated scans or oversized join intermediates can outweigh these costs. This pattern is consistent with the reported suite totals: the baseline grows by $37.2\times$ from SF1 to SF8, compared with $10.5\times$ for the optimised suite, and the reported improvement widens from $2.5\times$ to $8.8\times$. Group A's aggregate speedup likewise increases from $5.5\times$ to $29.8\times$. These figures indicate the potential scaling benefit of the rewrites, although the baseline and optimised suite runs were performed on different machines and should not be treated as a controlled, query-by-query causal comparison.
+The benefit of a query rewrite depends on how its additional work compares with the work it avoids as fact-table cardinalities grow. At a small scale factor, the fixed costs of materialising a common table expression, building a temporary result, or performing a second aggregation may be a substantial fraction of total execution time; at larger scale factors, avoiding repeated scans or oversized join intermediates can outweigh these costs. This pattern is consistent with the reported suite totals: the baseline grows by $37.2\times$ from SF1 to SF8, compared with $10.5\times$ for the optimised suite, and the reported improvement widens from $2.5\times$ to $8.8\times$. Group A's aggregate speedup likewise increases from $5.5\times$ to $29.8\times$. These figures indicate the potential scaling benefit of the rewrites.
 
 Materialising a selective date or dimension input and fixing the join order can protect a TPC-DS query from a cost-based plan choice that becomes poor as table cardinalities and optimizer estimates change. Query 21 illustrates this risk: the baseline takes about $0.30$\,s at SF1 but $53.31$\,s at SF2 after MySQL changes its access path, whereas the date-driven rewrite takes $0.10$\,s and $0.14$\,s, respectively. Such plan control is not free or universally preferable: materialisation adds temporary-table work, and \texttt{STRAIGHT\_JOIN} limits the optimizer's freedom to choose another order. Its value therefore depends on whether the driving input remains selective and whether the avoided scans or intermediate rows are large enough to justify the extra work; the example demonstrates a larger benefit at scale, not a measured low-scale regression.
 
@@ -269,7 +269,7 @@ Early aggregation and index-driven access have similarly scale- and data-depende
 
 \subsection{Total Runtime Across Scale Factors}
 
-Figure~\ref{fig:total_runtime} compares the total runtime of the 99 queries of the historical baseline (\texttt{qmod\_combined}) with the optimised suite (\texttt{final\_combined}, median of the four warm runs described in the methodology) for each scale factor. The baseline grows from 397.8\,s at SF1 to 14,818.9\,s at SF8, a $37.2\times$ increase for $8\times$ more data, and stays well above linear scaling from SF2 onwards. The optimised suite grows from 160.3\,s to 1,681.2\,s ($10.5\times$), so the overall improvement widens from $2.5\times$ at SF1 to $8.8\times$ at SF8. The two series were measured on different machines and the optimised suite does not yet include the queries in \texttt{our\_opt} that are not synchronised into \texttt{final\_combined} (Q1, Q5, Q8, Q14, Q92, Q93 and Q96), so these factors indicate the trend rather than an exact like-for-like speedup.
+Figure~\ref{fig:total_runtime} compares the total runtime of the 99 queries of the historical baseline (\texttt{qmod\_combined}) with the optimised suite (\texttt{final\_combined}, median of the four warm runs described in the methodology) for each scale factor. The baseline grows from 397.8\,s at SF1 to 14,818.9\,s at SF8, a $37.2\times$ increase for $8\times$ more data, and stays well above linear scaling from SF2 onwards. The optimised suite grows from 160.3\,s to 1,681.2\,s ($10.5\times$), so the overall improvement widens from $2.5\times$ at SF1 to $8.8\times$ at SF8. Both series were measured on the same machine and benchmark environment. However, the optimised suite does not yet include the queries in \texttt{our\_opt} that are not synchronised into \texttt{final\_combined} (Q1, Q5, Q8, Q14, Q92, Q93 and Q96), and the baseline includes queries whose inherited versions differ semantically from the originals (Section~\ref{sec:important_notice}); therefore, suite-level ratios are not a fully like-for-like comparison.
 
 \begin{figure}[htbp]
 \centering
@@ -280,7 +280,7 @@ Figure~\ref{fig:total_runtime} compares the total runtime of the 99 queries of t
 
 \subsection{Per-Query Execution Time}
 
-Figures~\ref{fig:query_times_sf1}--\ref{fig:query_times_sf8} show every query at each scale factor, ordered by its baseline runtime. Each vertical segment connects the baseline (blue) and optimised (orange) runtime of one query. A few slow queries dominate the workload: the five slowest baseline queries account for 50--67\% of the total baseline runtime at every scale factor. The largest absolute gain is Q72 at every scale factor (5,404.4\,s to 25.1\,s at SF8); at SF8 it is followed by Q13 (715.5\,s to 5.7\,s) and Q73 (597.2\,s to 1.2\,s). Queries that were not rewritten also differ between the two series because of the different hardware, and between two and eight queries per scale factor are slower in the optimised run (for example Q41 and Q62 at SF8).
+Figures~\ref{fig:query_times_sf1}--\ref{fig:query_times_sf8} show every query at each scale factor, ordered by its baseline runtime. Each vertical segment connects the baseline (blue) and optimised (orange) runtime of one query. A few slow queries dominate the workload: the five slowest baseline queries account for 50--67\% of the total baseline runtime at every scale factor. The largest absolute gain is Q72 at every scale factor (5,404.4\,s to 25.1\,s at SF8); at SF8 it is followed by Q13 (715.5\,s to 5.7\,s) and Q73 (597.2\,s to 1.2\,s). Queries that were not rewritten also differ between the two series, and between two and eight queries per scale factor are slower in the optimised run (for example Q41 and Q62 at SF8). Since both series were measured on the same machine and benchmark environment, these differences are not attributable to different hardware; they may reflect variation between benchmark runs.
 
 \begin{figure}[htbp]
 \centering
@@ -318,7 +318,7 @@ Queries in Group A (Q4, Q11, Q21, Q47, Q50, Q74, Q81) aggregate large fact table
 
 \paragraph{Baseline of Q4 and Q11.} The inherited \texttt{qmod\_combined} versions of Q4 and Q11 did not preserve the original queries: Q4 compared absolute 2001 totals instead of the 2001$\rightarrow$2002 growth ratios of the three channels, and both returned \texttt{customer\_birth\_country} instead of \texttt{customer\_login}. On SF1 the inherited Q4 returns 245 rows, whereas the original returns 8. Our optimised Q4 and Q11 implement the original semantics. Following the decision in Section~\ref{sec:important_notice}, the benchmark results below still compare them with the inherited baseline (marked with $^\dagger$). This understates their gain, because the original queries are considerably slower than the inherited ones: against the original queries, measured on our local instance, Q4 is $16.7\times$ (SF1) and $19.3\times$ (SF2) faster and Q11 $16.7\times$ and $17.3\times$.
 
-\paragraph{Measurements and correctness.} All timings in the tables of this section come from the full benchmark (Section~\ref{sec:benchmark}): the historical baseline power test and the optimised suite measured as described in Section~\ref{sec:methodology}, at SF1, SF2, SF4 and SF8. As noted there, the two series were measured on different machines. The execution plans and the local measurements quoted in the text were obtained on a separate local instance (Apple M4, 10 cores, 24\,GiB RAM, MySQL 8.4.13, 6\,GiB InnoDB buffer pool) at SF1 (4.34\,GB including indexes) and SF2 (7.59\,GB). On this instance, correctness was verified by executing each optimised query and its baseline (the original query for Q4 and Q11) with the trailing \texttt{LIMIT} removed and comparing the complete result sets (exact comparison of decimals and strings, relative tolerance $10^{-9}$ for floating-point aggregates). All seven queries return identical results, in the same order, on SF1 and SF2.
+\paragraph{Measurements and correctness.} All timings in the tables of this section come from the full benchmark (Section~\ref{sec:benchmark}): the historical baseline power test and the optimised suite measured as described in Section~\ref{sec:methodology}, at SF1, SF2, SF4 and SF8. Both series were measured on the same machine and benchmark environment, although in separate benchmark executions. The execution plans and the local measurements quoted in the text were obtained on a separate local instance (Apple M4, 10 cores, 24\,GiB RAM, MySQL 8.4.13, 6\,GiB InnoDB buffer pool) at SF1 (4.34\,GB including indexes) and SF2 (7.59\,GB). On this instance, correctness was verified by executing each optimised query and its baseline (the original query for Q4 and Q11) with the trailing \texttt{LIMIT} removed and comparing the complete result sets (exact comparison of decimals and strings, relative tolerance $10^{-9}$ for floating-point aggregates). All seven queries return identical results, in the same order, on SF1 and SF2.
 
 \subsection{Group A Performance Summary}
 Table~\ref{tab:group_a_results} reports the speedup of each optimised query over the baseline at every scale factor and Table~\ref{tab:group_a_times} the underlying execution times. The Total column is the ratio of the runtimes summed over the four scale factors.
@@ -485,7 +485,7 @@ Listing~\ref{lst:q21_explain_opt} shows the optimised plan on SF2: the date wind
             -> Single-row index lookup on item using PRIMARY (i_item_sk=t.inv_item_sk)  (cost=0.25 rows=1)
 \end{lstlisting}
 
-Figure~\ref{fig:highlight_q21} places Q21 in the full benchmark across all four scale factors, comparing the historical baseline with the optimised suite. The baseline jumps from 0.30\,s at SF1 to 53.31\,s at SF2 and reaches 351.51\,s at SF8, whereas the optimised query grows smoothly from 0.10\,s to 0.65\,s, about $540\times$ faster at SF8. As for the totals, the two series come from different machines.
+Figure~\ref{fig:highlight_q21} places Q21 in the full benchmark across all four scale factors, comparing the historical baseline with the optimised suite. The baseline jumps from 0.30\,s at SF1 to 53.31\,s at SF2 and reaches 351.51\,s at SF8, whereas the optimised query grows smoothly from 0.10\,s to 0.65\,s, about $540\times$ faster at SF8. Both series were measured on the same machine and benchmark environment, in separate benchmark executions.
 
 \begin{figure}[htbp]
 \centering
@@ -696,7 +696,7 @@ Query 80 joins 3 sales fact tables (\texttt{store\_sales, catalog\_sales, web\_s
 
 \section{Group C: Disjunctive Predicate Pushdown and Star-Join Ordering (Law II + Law III)}
 
-Group C contains Queries 13, 46, 48, 63, 73, and 79. These are the six rewrites that reduced execution time on SF1 in our measurements. Their common challenge is that selective conditions are either coupled across several branches of an \texttt{OR} predicate or applied in a multi-table join where join order affects how much of a fact table is read. We apply the selection-pushdown rule (Law II) and the join-order rule (Law III), introduced in the optimization framework above, to expose safe filters and guide the plan toward selective inputs.
+Group C contains Queries 13, 46, 48, 63, 73, and 79. Each optimized query has a lower measured SF1 runtime than its baseline. Their common challenge is that selective conditions are either coupled across several branches of an \texttt{OR} predicate or applied in a multi-table join where join order affects how much of a fact table is read. We apply the selection-pushdown rule (Law II) and the join-order rule (Law III), introduced in the optimization framework above, to expose safe filters and guide the plan toward selective inputs.
 
 \subsection{Law II: Selection Pushdown and Disjunctive Bounding-Box Extraction}
 
@@ -707,7 +707,7 @@ Law II moves a predicate to the relation that owns the filtered attribute, so ro
 Inner joins can be associated in different orders without changing their relational result, but each order can produce different intermediate cardinalities and access paths. Law III materializes useful filtered inputs with \texttt{NO\_MERGE()} and uses \texttt{STRAIGHT\_JOIN} where needed to drive from a selective date or dimension input into a fact-table index. These are plan-shaping techniques rather than performance guarantees; the resulting execution tree must be checked for each workload and scale factor.
 
 \subsection{Group C Performance Summary}
-The table is restricted to the six Group C queries with positive SF1 execution-time results. Timing and aggregate summary values are left blank pending the completed group summary.
+Table~\ref{tab:group_c_results} reports each query's speedup and Table~\ref{tab:group_c_times} gives the underlying runtimes. Baseline values are from the historical full-suite power-test files for \texttt{qmod\_combined}; optimized values are the medians of warm runs 2--5 in \texttt{overnight\_scientific\_benchmark.csv}. The latter benchmark ran \texttt{final\_combined}; for all six Group C queries, those SQL files are identical to the corresponding files in \texttt{our\_opt}. Both series were measured on the same machine and benchmark environment, in separate benchmark executions. Thus, hardware differences do not confound the comparison, although the timings may still be affected by run-to-run variation and differences in measurement procedure. For each query, the Total column is the ratio of its summed baseline runtimes to its summed optimized runtimes across the four scale factors; the aggregate row applies the same ratio to group totals, rather than averaging query speedups.
 
 \begin{table}[htbp]
 \centering
@@ -716,43 +716,66 @@ The table is restricted to the six Group C queries with positive SF1 execution-t
 \begin{tabular}{@{}lrrrrr@{}}
 \toprule
 \textbf{Query} & \textbf{SF1 ($\times$)} & \textbf{SF2 ($\times$)} & \textbf{SF4 ($\times$)} & \textbf{SF8 ($\times$)} & \textbf{Total ($\times$)} \\ \midrule
-Query 13 & -- & -- & -- & -- & -- \\
-Query 46 & -- & -- & -- & -- & -- \\
-Query 48 & -- & -- & -- & -- & -- \\
-Query 63 & -- & -- & -- & -- & -- \\
-Query 73 & -- & -- & -- & -- & -- \\
-Query 79 & -- & -- & -- & -- & -- \\ \midrule
-\textbf{Group C Total / Average} & \textbf{--} & \textbf{--} & \textbf{--} & \textbf{--} & \textbf{--} \\ \bottomrule
+Query 13 & 4.2 & 5.5 & 6.2 & 125.9 & 67.9 \\
+Query 46 & 6.6 & 7.3 & 6.8 & 56.1 & 33.0 \\
+Query 48 & 4.2 & 5.5 & 6.0 & 10.0 & 7.9 \\
+Query 63 & 2.1 & 2.4 & 2.4 & 155.2 & 82.2 \\
+Query 73 & 15.9 & 16.6 & 21.1 & 504.7 & 289.5 \\
+Query 79 & 13.0 & 14.2 & 16.3 & 23.0 & 19.7 \\ \midrule
+\textbf{Group C Aggregate} & \textbf{6.2} & \textbf{7.6} & \textbf{8.4} & \textbf{82.0} & \textbf{47.4} \\ \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Group C Execution Times in Seconds (Baseline: Historical Power Test; Optimized: Median of Warm Runs 2--5)}
+\label{tab:group_c_times}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrrrrrr@{}}
+\toprule
+ & \multicolumn{2}{c}{\textbf{SF1}} & \multicolumn{2}{c}{\textbf{SF2}} & \multicolumn{2}{c}{\textbf{SF4}} & \multicolumn{2}{c}{\textbf{SF8}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7} \cmidrule(l){8-9}
+\textbf{Query} & Base & Opt. & Base & Opt. & Base & Opt. & Base & Opt. \\ \midrule
+Query 13 & 3.670 & 0.876 & 8.246 & 1.506 & 17.956 & 2.916 & 715.509 & 5.681 \\
+Query 46 & 3.919 & 0.598 & 9.268 & 1.267 & 18.157 & 2.669 & 286.942 & 5.117 \\
+Query 48 & 3.772 & 0.907 & 8.546 & 1.549 & 18.208 & 3.018 & 60.467 & 6.077 \\
+Query 63 & 0.122 & 0.058 & 0.250 & 0.105 & 0.495 & 0.209 & 63.020 & 0.406 \\
+Query 73 & 2.073 & 0.130 & 4.321 & 0.261 & 11.628 & 0.550 & 597.213 & 1.183 \\
+Query 79 & 4.593 & 0.354 & 10.226 & 0.718 & 25.050 & 1.540 & 81.160 & 3.528 \\ \midrule
+\textbf{Group C Total} & \textbf{18.149} & \textbf{2.924} & \textbf{40.857} & \textbf{5.405} & \textbf{91.494} & \textbf{10.903} & \textbf{1804.310} & \textbf{21.993} \\ \bottomrule
+\end{tabular}
+\end{table}
+
+Across SF1--SF4, the group baseline total rises from 18.149\,s to 91.494\,s, while the optimized total rises from 2.924\,s to 10.903\,s. At SF8, the baseline total reaches 1,804.310\,s, compared with 21.993\,s for the optimized queries. Thus, the aggregate ratio rises from $6.2\times$ at SF1 to $82.0\times$ at SF8. This widening is concentrated in large SF8 baseline runtimes for Q13, Q46, Q63, and Q73; without corresponding SF8 execution plans, the measurements alone do not identify their cause. From SF1 to SF8, the optimized group grows by $7.5\times$ for an eightfold scale-factor increase, whereas the baseline grows by $99.4\times$. The series were measured on the same machine and benchmark environment, so this scaling comparison is not confounded by different hardware; it should nevertheless be interpreted in light of separate executions and the timing procedures noted above.
 
 \subsection{Group C Highlight: Query 13 Optimization}
 
 \subsubsection{Query Description and SF1 Baseline Plan}
 Query 13 computes the average quantity, average extended sales price, average extended wholesale cost, and total extended wholesale cost for 2001 store sales. Rows qualify through two correlated three-branch disjunctions: one combines household dependent count, customer marital status and education, and sales-price ranges; the other combines address-state groups with net-profit ranges.
 
-At SF8, the baseline Query 13 was the second-longest executing query in the workload, taking 715.51\,s. This large increase at the larger scale factor shows that the baseline plan does not scale well. SF8 baseline and optimized execution trees have not yet been collected; the trees below are the available SF1 \texttt{EXPLAIN ANALYZE} output.
+The benchmark table shows Q13's baseline runtime increasing from 3.670\,s at SF1 to 715.509\,s at SF8, while the optimized runtime increases from 0.876\,s to 5.681\,s. Figure~\ref{fig:highlight_q13} compares the two series across all scale factors. The SF8 ratio is $125.9\times$, but the available measurements do not establish why the baseline rises sharply between SF4 and SF8; SF8 execution trees have not been collected.
 
-The SF1 baseline plan begins with a scan of \texttt{customer\_address}, then performs 13,837 address-driven lookups into \texttt{store\_sales} using the \texttt{ss\_a} index. It applies the fact-side price/profit and correlated \texttt{OR} conditions during those lookups, and checks the 2001 date predicate only after several joins. The resulting nested-loop plan takes 107,374\,ms in this recorded analysis run.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.7\textwidth]{report/highlight_q13.png}
+\caption{Query 13 runtime across scale factors: historical baseline and optimized query. Both timing series were measured on the same machine and benchmark environment, in separate benchmark executions.}
+\label{fig:highlight_q13}
+\end{figure}
 
-\begin{lstlisting}[caption={Baseline \texttt{EXPLAIN ANALYZE} tree on SF1 for Query 13}, label={lst:q13_explain_base_sf1}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
--> Aggregate: avg(store_sales.ss_quantity), avg(store_sales.ss_ext_sales_price), avg(store_sales.ss_ext_wholesale_cost), sum(store_sales.ss_ext_wholesale_cost)  (cost=324051 rows=1) (actual time=107374..107374 rows=1 loops=1)
-    -> Nested loop inner join  (cost=324047 rows=37.5) (actual time=3554..107373 rows=5 loops=1)
-        -> Nested loop inner join  (cost=323223 rows=750) (actual time=23.8..107282 rows=274 loops=1)
-            -> Nested loop inner join  (cost=315128 rows=7496) (actual time=12.7..107274 rows=1453 loops=1)
-                -> Nested loop inner join  (cost=304618 rows=27660) (actual time=3.99..107140 rows=14165 loops=1)
-                    -> Nested loop inner join  (cost=294937 rows=27660) (actual time=3.98..107080 rows=14165 loops=1)
-                        -> Filter: (((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('IA','MN','MT'))) or ((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('AR','IN','TX'))) or ((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('TN','NE','WV'))))  (cost=5513 rows=4345) (actual time=0.191..179 rows=13837 loops=1)
-                            -> Table scan on customer_address  (cost=5513 rows=49753) (actual time=0.17..143 rows=50000 loops=1)
-                        -> Filter: (((store_sales.ss_sales_price between 100.00 and 150.00) or (store_sales.ss_sales_price between 50.00 and 100.00) or (store_sales.ss_sales_price between 150.00 and 200.00)) and (((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('IA','MN','MT')) and (store_sales.ss_net_profit between 100 and 200)) or ((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('AR','IN','TX')) and (store_sales.ss_net_profit between 150 and 300)) or ((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('TN','NE','WV')) and (store_sales.ss_net_profit between 50 and 250))) and (store_sales.ss_store_sk is not null) and (store_sales.ss_hdemo_sk is not null) and (store_sales.ss_sold_date_sk is not null) and (store_sales.ss_cdemo_sk is not null))  (cost=59.4 rows=6.37) (actual time=6.44..7.72 rows=1.02 loops=13837)
-                            -> Index lookup on store_sales using ss_a (ss_addr_sk=customer_address.ca_address_sk)  (cost=59.4 rows=71.9) (actual time=5.49..7.69 rows=55.2 loops=13837)
-                    -> Single-row covering index lookup on store using PRIMARY (s_store_sk=store_sales.ss_store_sk)  (cost=0.25 rows=1) (actual time=0.00375..0.00378 rows=1 loops=14165)
-                -> Filter: (((household_demographics.hd_dep_count = 3) and (store_sales.ss_sales_price between 100.00 and 150.00)) or ((household_demographics.hd_dep_count = 1) and (store_sales.ss_sales_price between 50.00 and 100.00)) or ((household_demographics.hd_dep_count = 1) and (store_sales.ss_sales_price between 150.00 and 200.00)))  (cost=0.28 rows=0.271) (actual time=0.0089..0.00891 rows=0.103 loops=14165)
-                    -> Single-row index lookup on household_demographics using PRIMARY (hd_demo_sk=store_sales.ss_hdemo_sk)  (cost=0.28 rows=1) (actual time=0.00751..0.00755 rows=1 loops=14165)
-            -> Filter: (date_dim.d_year = 2001)  (cost=0.98 rows=0.1) (actual time=0.00551..0.00553 rows=0.189 loops=1453)
-                -> Single-row index lookup on date_dim using PRIMARY (d_date_sk=store_sales.ss_sold_date_sk)  (cost=0.98 rows=1) (actual time=0.00501..0.00504 rows=1 loops=1453)
-        -> Filter: (((household_demographics.hd_dep_count = 3) and (customer_demographics.cd_education_status = 'Secondary') and (customer_demographics.cd_marital_status = 'S') and (store_sales.ss_sales_price between 100.00 and 150.00)) or ((household_demographics.hd_dep_count = 1) and (customer_demographics.cd_education_status = '4 yr Degree') and (customer_demographics.cd_marital_status = 'U') and (store_sales.ss_sales_price between 50.00 and 100.00)) or ((household_demographics.hd_dep_count = 1) and (customer_demographics.cd_education_status = '2 yr Degree') and (customer_demographics.cd_marital_status = 'W') and (store_sales.ss_sales_price between 150.00 and 200.00)))  (cost=1 rows=0.05) (actual time=0.331..0.331 rows=0.0182 loops=274)
-            -> Single-row index lookup on customer_demographics using PRIMARY (cd_demo_sk=store_sales.ss_cdemo_sk)  (cost=1 rows=1) (actual time=0.327..0.327 rows=1 loops=274)
+The SF1 baseline plan begins with a scan of \texttt{customer\_address}, then performs 13,837 address-driven lookups into \texttt{store\_sales} using the \texttt{ss\_a} index. It applies the fact-side price/profit and correlated \texttt{OR} conditions during those lookups, and checks the 2001 date predicate only after several joins. In the separate \texttt{EXPLAIN ANALYZE} profiling run shown below, the baseline tree takes 107,374\,ms. This plan-profile runtime is not the full-benchmark timing in Table~\ref{tab:group_c_times} and should not be compared to it as if measured in the same run.
+
+\begin{lstlisting}[caption={Condensed baseline \texttt{EXPLAIN ANALYZE} plan on SF1 for Query 13}, label={lst:q13_explain_base_sf1}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
+-> Aggregate: AVG(quantity), AVG(sales_price), AVG(wholesale_cost), SUM(wholesale_cost) (cost=324051, actual time=107374 ms, rows=1)
+    -> Nested-loop joins (cost=324047); 5 rows reach the aggregate
+        -> Scan customer_address (cost=5513): 50,000 rows; U.S./state filters leave 13,837
+        -> Index lookup store_sales via ss_a (cost=59.4), 13,837 address loops
+           Price/profit and correlated OR filters; 55.2 rows/loop, 14,165 rows out
+        -> Store PK lookups (cost=0.25, 14,165 loops)
+        -> Household PK lookups and dependent-count/price filters (cost=0.28)
+           14,165 loops; 1,453 rows out
+        -> Date PK lookups and d_year = 2001 filter (cost=0.98; 1,453 loops; 274 rows out)
+        -> Customer-demographics PK lookups and branch filters (cost=1; 274 loops; 5 rows out)
 \end{lstlisting}
 
 \subsubsection{Application of the Optimization Laws}
@@ -846,52 +869,39 @@ STRAIGHT_JOIN filtered_addresses ca ON ca.ca_address_sk = ss.ss_addr_sk
 \end{lstlisting}
 
 \subsubsection{SF1 Optimized Execution Plan}
-The optimized plan begins with a materialized 365-row \texttt{filtered\_dates} CTE, then uses the \texttt{ss\_d} index on \texttt{store\_sales} for each date key. The broad bounds reduce those lookups to 17,467 materialized sales rows before dimension joins. Household, demographic, and address candidate sets are materialized and probed by surrogate key. The root actual time is 54,804\,ms; the demographic and address CTEs still require full dimension-table scans at SF1.
+The optimized plan begins with a materialized 365-row \texttt{filtered\_dates} CTE, then uses the \texttt{ss\_d} index on \texttt{store\_sales} for each date key. The broad bounds reduce those lookups to 17,467 materialized sales rows before dimension joins. Household, demographic, and address candidate sets are materialized and probed by surrogate key. The root actual time is 54,804\,ms; the demographic and address CTEs still require full dimension-table scans at SF1. The costs shown in both listings are MySQL optimizer estimates, not elapsed times.
 
-\begin{lstlisting}[caption={Optimized \texttt{EXPLAIN ANALYZE} tree on SF1 for Query 13}, label={lst:q13_explain_opt_sf1}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
--> Aggregate: avg(ss.ss_quantity), avg(ss.ss_ext_sales_price), avg(ss.ss_ext_wholesale_cost), sum(ss.ss_ext_wholesale_cost)  (cost=725360 rows=1) (actual time=54804..54804 rows=1 loops=1)
-    -> Nested loop inner join  (cost=688257 rows=371033) (actual time=54784..54804 rows=5 loops=1)
-        -> Nested loop inner join  (cost=490599 rows=33277) (actual time=54734..54760 rows=53 loops=1)
-            -> Nested loop inner join  (cost=98459 rows=57293) (actual time=53856..53881 rows=1793 loops=1)
-                -> Nested loop inner join  (cost=24464 rows=15101) (actual time=53853..53869 rows=17262 loops=1)
-                    -> Filter: (((ss.ss_sales_price between 100.00 and 150.00) or (ss.ss_sales_price between 50.00 and 100.00) or (ss.ss_sales_price between 150.00 and 200.00)) and ((ss.ss_net_profit between 100 and 200) or (ss.ss_net_profit between 150 and 300) or (ss.ss_net_profit between 50 and 250)) and (ss.ss_store_sk is not null) and (ss.ss_hdemo_sk is not null) and (ss.ss_cdemo_sk is not null) and (ss.ss_addr_sk is not null))  (cost=13.9e+6..19179 rows=15101) (actual time=53853..53858 rows=17262 loops=1)
-                        -> Table scan on ss  (cost=13.9e+6..13.9e+6 rows=170478) (actual time=53852..53854 rows=17467 loops=1)
-                            -> Materialize CTE eligible_sales  (cost=13.9e+6..13.9e+6 rows=170478) (actual time=53852..53852 rows=17467 loops=1)
-                                -> Nested loop inner join  (cost=13.9e+6 rows=170478) (actual time=69.9..53833 rows=17467 loops=1)
-                                    -> Table scan on d  (cost=8631..8724 rows=7247) (actual time=43..43.5 rows=365 loops=1)
-                                        -> Materialize CTE filtered_dates  (cost=8631..8631 rows=7247) (actual time=43..43 rows=365 loops=1)
-                                            -> Filter: (date_dim.d_year = 2001)  (cost=7906 rows=7247) (actual time=29.2..42.9 rows=365 loops=1)
-                                                -> Table scan on date_dim  (cost=7906 rows=72468) (actual time=4.68..40.2 rows=73049 loops=1)
-                                    -> Filter: ((ss.ss_sales_price between 50.00 and 200.00) and (ss.ss_net_profit between 50 and 300))  (cost=1724 rows=23.5) (actual time=18.6..147 rows=47.9 loops=365)
-                                        -> Index lookup on ss using ss_d (ss_sold_date_sk=d.d_date_sk)  (cost=1724 rows=1906) (actual time=18.5..147 rows=1497 loops=365)
-                    -> Single-row covering index lookup on s using PRIMARY (s_store_sk=ss.ss_store_sk)  (cost=0.25 rows=1) (actual time=477e-6..496e-6 rows=1 loops=17262)
-                -> Filter: (((hd.hd_dep_count = 3) and (ss.ss_sales_price between 100.00 and 150.00)) or ((hd.hd_dep_count = 1) and (ss.ss_sales_price between 50.00 and 100.00)) or ((hd.hd_dep_count = 1) and (ss.ss_sales_price between 150.00 and 200.00)))  (cost=636..3.5 rows=3.79) (actual time=649e-6..665e-6 rows=0.104 loops=17262)
-                    -> Covering index lookup on hd using <auto_key0> (hd_demo_sk=ss.ss_hdemo_sk)  (cost=863..867 rows=14) (actual time=507e-6..531e-6 rows=0.208 loops=17262)
-                        -> Materialize CTE filtered_households  (cost=863..863 rows=1426) (actual time=3.2..3.2 rows=1440 loops=1)
-                            -> Filter: (household_demographics.hd_dep_count in (1,3))  (cost=720 rows=1426) (actual time=0.31..2.28 rows=1440 loops=1)
-                                -> Table scan on household_demographics  (cost=720 rows=7131) (actual time=0.284..1.99 rows=7200 loops=1)
-            -> Filter: (((hd.hd_dep_count = 3) and (cd.cd_education_status = 'Secondary') and (cd.cd_marital_status = 'S') and (ss.ss_sales_price between 100.00 and 150.00)) or ((hd.hd_dep_count = 1) and (cd.cd_education_status = '4 yr Degree') and (cd.cd_marital_status = 'U') and (ss.ss_sales_price between 50.00 and 100.00)) or ((hd.hd_dep_count = 1) and (cd.cd_education_status = '2 yr Degree') and (cd.cd_marital_status = 'W') and (ss.ss_sales_price between 150.00 and 200.00)))  (cost=4.89..4.89 rows=0.581) (actual time=0.49..0.49 rows=0.0296 loops=1793)
-                -> Index lookup on cd using <auto_key1> (cd_demo_sk=ss.ss_cdemo_sk)  (cost=204780..204785 rows=19.6) (actual time=0.49..0.49 rows=0.0909 loops=1793)
-                    -> Materialize CTE filtered_demographics  (cost=204780..204780 rows=56770) (actual time=876..876 rows=164640 loops=1)
-                        -> Filter: (((customer_demographics.cd_education_status = 'Secondary') and (customer_demographics.cd_marital_status = 'S')) or ((customer_demographics.cd_education_status = '4 yr Degree') and (customer_demographics.cd_marital_status = 'U')) or ((customer_demographics.cd_education_status = '2 yr Degree') and (customer_demographics.cd_marital_status = 'W')))  (cost=199103 rows=56770) (actual time=2.28..622 rows=164640 loops=1)
-                            -> Table scan on customer_demographics  (cost=199103 rows=1.91e+6) (actual time=2.21..368 rows=1.92e+6 loops=1)
-        -> Filter: (((ca.ca_state in ('IA','MN','MT')) and (ss.ss_net_profit between 100 and 200)) or ((ca.ca_state in ('AR','IN','TX')) and (ss.ss_net_profit between 150 and 300)) or ((ca.ca_state in ('TN','NE','WV')) and (ss.ss_net_profit between 50 and 250)))  (cost=4880..4.24 rows=11.1) (actual time=0.831..0.831 rows=0.0943 loops=53)
-            -> Index lookup on ca using <auto_key1> (ca_address_sk=ss.ss_addr_sk)  (cost=5361..5365 rows=17) (actual time=0.83..0.83 rows=0.189 loops=53)
-                -> Materialize CTE filtered_addresses  (cost=5360..5360 rows=2488) (actual time=43.9..43.9 rows=13837 loops=1)
-                    -> Filter: ((customer_address.ca_country = 'United States') and (customer_address.ca_state in ('IA','MN','MT','AR','IN','TX','TN','NE','WV')))  (cost=5112 rows=2488) (actual time=0.403..37.1 rows=13837 loops=1)
-                        -> Table scan on customer_address  (cost=5112 rows=49753) (actual time=0.351..28 rows=50000 loops=1)
+\begin{lstlisting}[caption={Condensed optimized \texttt{EXPLAIN ANALYZE} plan on SF1 for Query 13}, label={lst:q13_explain_opt_sf1}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
+-> Aggregate: AVG(quantity), AVG(sales_price), AVG(wholesale_cost), SUM(wholesale_cost) (cost=725360, actual time=54804 ms, rows=1)
+    -> Nested-loop joins (cost=688257); 5 rows reach the aggregate
+        -> Materialize filtered_dates (cost=8631; date_dim scan cost=7906): 73,049 dates; year filter leaves 365
+        -> Index lookup store_sales via ss_d (cost=1724; 365 date-key loops)
+           Price/profit bounds leave 17,467 eligible sales rows
+        -> Store PK lookups (cost=0.25; 17,262 loops)
+        -> Materialize filtered_households (cost=863; table scan cost=720)
+           Scan 7,200 rows; dependent-count filter leaves 1,440; key probe cost=863..867
+           Exact branch filter leaves 1,793 sales rows
+        -> Materialize filtered_demographics (cost=204780; table scan cost=199103)
+           Scan 1.92M rows; status/education filter leaves 164,640; key probe cost=204780..204785
+           Exact branch filter leaves 53 sales rows
+        -> Materialize filtered_addresses (cost=5360; table scan cost=5112)
+           Scan 50,000 rows; country/state filter leaves 13,837; key probe cost=5361..5365
+           Exact state/profit filter leaves 5 rows
 \end{lstlisting}
 
-\subsubsection{SF8 Execution Plan Placeholders}
-The baseline Query 13 is the second-longest query at SF8, but SF8 execution trees have not yet been collected. Insert the corresponding measured trees when available.
+\subsection{Other Group C Queries}
 
-\begin{lstlisting}[caption={Baseline Query 13 \texttt{EXPLAIN ANALYZE} tree on SF8 (pending)}, label={lst:q13_explain_base_sf8}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
-[SF8 baseline execution tree pending collection]
-\end{lstlisting}
+\paragraph{Query 46.} The rewrite materializes the date keys for weekdays 0 and 6 in 2000--2002, stores in Fairview or Midway, and households satisfying either \texttt{hd\_dep\_count = 6} or \texttt{hd\_vehicle\_count = 4}. It drives from these dates into \texttt{store\_sales}, then joins the selected stores and households and the purchased-address dimension before aggregating coupon amount and net profit by ticket, customer, address key, and purchased city. The customer and current-address lookups occur after this aggregation; the final city inequality, ordering, and limit are retained. The \texttt{ss\_addr\_sk} grouping key is necessary even though it is not projected, because removing it could combine rows that the baseline groups separately. The measured speedup is $6.6\times$ at SF1 and $56.1\times$ at SF8. The latter reflects a substantial SF8 baseline runtime (286.942\,s); without an SF8 plan, the timing does not establish the underlying optimizer behavior.
 
-\begin{lstlisting}[caption={Optimized Query 13 \texttt{EXPLAIN ANALYZE} tree on SF8 (pending)}, label={lst:q13_explain_opt_sf8}, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
-[SF8 optimized execution tree pending collection]
-\end{lstlisting}
+\paragraph{Query 48.} This query sums store-sales quantity for 2002 under two three-branch disjunctions: one correlates marital status and education with sales-price ranges, while the other correlates U.S. address-state groups with net-profit ranges. The rewrite restricts the date keys first and materializes the exact demographic status/education pairs and the union of candidate U.S. states. It also applies fact-side superset bounds of \$50--\$200 for sales price and 0--25{,}000 for net profit before the dimension joins. These bounds only exclude values outside every original branch: all branch-specific correlations and ranges remain in the final predicate. No grouping or aggregation is introduced, and the store join remains. Its speedup is comparatively stable through SF4 ($4.2\times$--$6.0\times$) and reaches $10.0\times$ at SF8, the smallest SF8 factor in this group.
+
+\paragraph{Query 63.} The rewrite materializes the date keys for month-sequence values 1176--1187 and filters items using the original two complete category/class/brand branches. Keeping each triple of attribute conditions together avoids admitting items through false cross-branch combinations. It drives sales from the qualifying item keys, then joins the selected dates and stores, and groups by manager and month. The manager-partitioned \texttt{AVG(SUM(...))} window calculation, deviation test, ordering, and limit remain in place. The SF1 improvement is modest ($2.1\times$), but the measured SF8 baseline rises to 63.020\,s against 0.406\,s optimized ($155.2\times$). The scale-dependent change is notable, although the available runs do not reveal its execution-plan cause.
+
+\paragraph{Query 73.} The rewrite prefilters date keys to days of month 1--2 in 1999--2001, stores in Williamson County, and households whose buy-potential is either \texttt{501-1000} or \texttt{5001-10000}, with a positive vehicle count and a dependent-to-vehicle ratio greater than one. The ratio's original \texttt{CASE} expression is retained, preserving its SQL behavior for exceptional or null values rather than replacing it with an assumed data-domain rule. Sales are aggregated into ticket/customer counts before the customer lookup; the \texttt{cnt BETWEEN 1 AND 5} predicate, output columns, and ordering are retained (the source query has no limit). Q73 has the largest measured gain in this group: $15.9\times$ at SF1 and $504.7\times$ at SF8. Its baseline grows from 11.628\,s at SF4 to 597.213\,s at SF8, while the optimized runtime grows from 0.550\,s to 1.183\,s.
+
+\paragraph{Query 79.} The rewrite materializes dates for weekday 1 in 1999--2001, stores with 200--295 employees, and households satisfying the original disjunction \texttt{hd\_dep\_count = 9 OR hd\_vehicle\_count > -1}. It leaves this disjunction unchanged: simplifying the vehicle-count branch based on presumed data-domain constraints could alter behavior for null or out-of-domain values. Sales are aggregated by ticket, customer, address key, and store city before the customer lookup; the address key remains a grouping key although it is not projected. The city substring, ordering, and limit are also retained. Its gains increase more gradually, from $13.0\times$ at SF1 to $23.0\times$ at SF8; the SF8 optimized runtime is 3.528\,s versus 81.160\,s for the baseline. The optimized Q79 timing follows a rerun after correcting a missing city projection, so it was not collected in the same immediate paired sequence as its baseline timing.
+
+\paragraph{Correctness evidence.} These rewrites are intended to preserve the original predicates and grouping semantics. The available Group C checks consist of sample-result inspection and \texttt{EXPLAIN ANALYZE}; they do not establish full result-set equivalence for all six queries. Accordingly, the performance measurements should not be read as a substitute for complete baseline-versus-optimized result comparison.
 
 \section{Other Optimisations}
 
