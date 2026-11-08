@@ -4,6 +4,7 @@
 \usepackage{amssymb}
 \usepackage{listings}
 \usepackage{graphicx}
+\usepackage{longtable}
 \sceau{Pictures/sceauULB.jpg}
 
 \addbibresource{biblio.bib}
@@ -32,7 +33,7 @@ This project was carried out by the team members, who designed the benchmark met
 
 \section{Project Overview}
 
-This report presents Part I of the course data-warehouse project: implementing and evaluating the TPC-DS decision-support benchmark on MySQL 8.0. We run the benchmark at scale factors 1, 2, 4, and 8 to study how query performance changes as the dataset grows. Our objectives are to identify bottlenecks in MySQL's execution of analytical queries and to evaluate query-rewriting and execution-plan strategies for improving runtimes. The scope of this report is the TPC-DS workload and its performance on MySQL; the course project's separate TPC-DI part is outside its scope.
+This report presents Part I of the course data-warehouse project: implementing and evaluating the TPC-DS decision-support benchmark on MySQL 8.0. We run the benchmark at scale factors 1, 2, 4, and 8 to study how query performance changes as the dataset grows. Our objectives are to identify bottlenecks in MySQL's execution of analytical queries and to evaluate query-rewriting and execution-plan strategies for improving runtimes. The scope of this report is the TPC-DS workload and its performance on MySQL.
 
 \section{TPC-DS}
 
@@ -77,49 +78,157 @@ MySQL is a widely adopted relational database management system built around the
 
 \section{Generalised Relational and Physical Optimization Framework}
 
-An initial analysis of the 99-query TPC-DS workload across Scale Factors (SF) 1, 2, 4, and 8 revealed that the most severe performance bottlenecks were runtimes jumping by $50\times$ to over $1,900\times$ between SF4 and SF8. They stemm from a recurring set of logical and physical execution flaws in MySQL 8.0. Rather than treating each slow query as an isolated edge case, we identified and formulated three generalisable optimisation rules grounded in relational algebra equivalences and physical storage architecture.
+Across the 99-query TPC-DS workload at Scale Factors (SF) 1, 2, 4, and 8, some queries exhibited runtime increases of approximately $50\times$ to more than $1{,}900\times$ between SF4 and SF8. These observations motivate a framework for analysing recurring sources of work in analytical queries, rather than treating each slow query as an isolated case. The framework comprises three complementary optimisation laws: reduce data through early aggregation, eliminate unnecessary rows through early filtering, and arrange the remaining joins and accesses appropriately. Each law is grounded in relational equivalences, but its physical benefit depends on query semantics, data distribution, indexes, and the execution plan selected by MySQL.
 
 \subsection{Law I: Distributive Aggregate Pushdown (Early Surrogate-Key Grouping)}
 
 \subsubsection{Theoretical Foundation}
-Let $R$ be a large fact relation (e.g., \texttt{store\_sales}, \texttt{catalog\_sales}) and $S$ be a dimension relation (e.g., \texttt{customer}, \texttt{item}, \texttt{store}) or a second fact relation (e.g., \texttt{inventory}). Suppose a query computes an aggregate $\gamma_{G,\, \text{AGG}(x)}(R \bowtie_{\theta} S)$, where the grouping set $G$ contains descriptive attributes from $S$ (e.g. customer names) and the join condition $\theta$ only references a subset of join keys $K_R \subseteq \text{attr}(R)$.
-
-By the distributive property of summation and counting over relational joins, we can push the grouping operator $\gamma$ down directly onto $R$ prior to evaluating the join $\bowtie_{\theta}$, provided we group by the compact surrogate key attributes $G_R = (G \cap \text{attr}(R)) \cup K_R$:
+Let $R$ be a fact relation with join key $k$ and measure $x$, and let $S$ be a dimension relation whose key $k$ uniquely identifies each dimension row. If the final grouping attribute $g$ is determined by that key, then a distributive aggregate such as \texttt{SUM} may be computed over $R$ before the join:
 \begin{equation}
-\gamma_{G,\, \text{SUM}(x),\, \text{COUNT}(*)}\left(R \bowtie_{\theta} S\right) \;\equiv\; \gamma_{G,\, \text{SUM}(\text{sum\_x}),\, \text{SUM}(\text{cnt})}\left( \left(\gamma_{G_R,\, \text{SUM}(x)\to\text{sum\_x},\, \text{COUNT}(*)\to\text{cnt}}(R)\right) \bowtie_{\theta} S \right)
+\gamma_{g;\,\text{SUM}(x)}(R \bowtie_{R.k=S.k} S)
+\;\equiv\;
+\gamma_{g;\,\text{SUM}(\text{partial\_sum})}
+\left(
+\gamma_{k;\,\text{SUM}(x)\to\text{partial\_sum}}(R)
+\bowtie_{R.k=S.k} S
+\right)
 \end{equation}
-Furthermore, when $K_R$ is a foreign key referencing the primary key of dimension $S$ (e.g., \texttt{c\_customer\_sk} $\to$ \texttt{c\_customer\_id}, \texttt{c\_first\_name}, \dots), the functional dependency $K_R \to G_S$ guarantees that grouping by the 4-byte integer surrogate key $K_R$ first is 100\% lossless with respect to the outer grouping attributes $G_S$.
+In practice, the early grouping key must also retain every fact-side attribute required by the final groups, joins, and predicates. Grouping by a surrogate key is lossless with respect to a dimension description only when the join key identifies the relevant dimension row; where multiple keys map to the same output description, a final aggregation by that description is still required. For \texttt{AVG}, the partial state must include both sum and count; averaging partial averages is generally incorrect. Likewise, partial \texttt{COUNT(DISTINCT)} values cannot in general be summed when their underlying values overlap.
+
+\paragraph{Illustrative SQL.}
+The following query first combines store sales by date key, then joins the reduced result to \texttt{date\_dim} to report annual totals:
+\begin{lstlisting}[language=SQL, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
+WITH sales_by_date AS (
+    SELECT ss_sold_date_sk, SUM(ss_sales_price) AS partial_sales
+    FROM store_sales
+    GROUP BY ss_sold_date_sk
+)
+SELECT d.d_year, SUM(s.partial_sales) AS annual_sales
+FROM sales_by_date AS s
+JOIN date_dim AS d
+    ON d.d_date_sk = s.ss_sold_date_sk
+GROUP BY d.d_year;
+\end{lstlisting}
+This rewrite assumes that \texttt{d\_date\_sk} uniquely identifies a date row and retains the original inner-join semantics. A query with additional fact-side grouping attributes or filters must preserve them at the appropriate stage.
 
 \subsubsection{Physical Impact in MySQL}
-When a query joins a multi-million-row fact table to wide dimension tables before grouping, MySQL's execution engine must materialise an internal temporary hash aggregation table whose composite hash key consists of multiple variable-length strings (e.g., 7 \texttt{VARCHAR}/\texttt{CHAR} columns in \texttt{customer} or 10 address columns in \texttt{store}). As scale factors grow from SF1 to SF8, this wide temporary table exceeds \texttt{tmp\_table\_size} / \texttt{max\_heap\_table\_size}, spilling to disk and causing severe I/O thrashing. By applying Law I, MySQL aggregates millions of fact rows using compact 4-byte integer surrogate keys (\texttt{\_sk}) in memory, reducing the cardinality of the intermediate relation by one to two orders of magnitude before ever probing the dimension table or reading wide string attributes.
+Joining fact rows to dimensions before grouping can make the grouping input large and require wide descriptive values to be carried through intermediate processing. Early aggregation can reduce both the row count and row width before the dimension join, particularly when many fact rows share a relatively small set of keys. MySQL may use internal temporary tables or sorting during grouping; depending on the plan, intermediate size, and server settings, temporary data may also be written to disk. These outcomes are plan-dependent: aggregation is beneficial only when the reduced intermediate result and its processing cost outweigh the work of the rewrite.
 
 \subsection{Law II: Selection Pushdown and Disjunctive (\texttt{OR}) Bounding-Box Extraction}
 
 \subsubsection{Theoretical Foundation}
-Standard relational query optimisers routinely push conjunctive selection predicates ($\sigma_{p_1 \land p_2}(R \bowtie S) \equiv \sigma_{p_1}(R) \bowtie \sigma_{p_2}(S)$) down to base relations. However, in complex analytical queries, selection predicates and equijoin conditions are frequently entangled inside disjunctive (\texttt{OR}) clauses spanning multiple relations:
+For an inner join, a predicate that refers only to one input can be applied to that input before the join:
 \begin{equation}
-\sigma_{\bigvee_{i=1}^{k} \left(\theta_{\text{join}} \,\land\, p_i(R) \,\land\, q_i(S)\right)}(R \times S)
+\sigma_{p(R)}(R \bowtie_{\theta} S)
+\;\equiv\;
+\sigma_{p(R)}(R) \bowtie_{\theta} S
 \end{equation}
-By the distributive law of conjunction over disjunction, common equijoin predicates $\theta_{\text{join}}$ can be factored out of the disjunction. More importantly, each relation's disjunctive domain forms a superset ``bounding box'' filter $P_R = \bigvee_{i=1}^{k} p_i(R)$ and $Q_S = \bigvee_{i=1}^{k} q_i(S)$ that must hold for any tuple to survive the overall disjunction:
+When an \texttt{OR} condition couples predicates from both relations, define $p_i(R)$ and $q_i(S)$ as the table-local predicates in branch $i$. The original condition can be retained as a residual predicate after applying necessary, potentially broader filters to each input:
 \begin{equation}
-\sigma_{\bigvee_{i=1}^{k} \left(\theta_{\text{join}} \,\land\, p_i(R) \,\land\, q_i(S)\right)}(R \times S) \;\equiv\; \sigma_{\bigvee_{i=1}^{k} \left(p_i(R) \,\land\, q_i(S)\right)}\left( \sigma_{\bigvee_{i=1}^{k} p_i(R)}(R) \;\bowtie_{\theta_{\text{join}}}\; \sigma_{\bigvee_{i=1}^{k} q_i(S)}(S) \right)
+\sigma_{\bigvee_{i=1}^{k}(p_i(R)\land q_i(S))}
+(R \bowtie_{\theta} S)
+\;\equiv\;
+\sigma_{\bigvee_{i=1}^{k}(p_i(R)\land q_i(S))}
+\left(
+\sigma_{\bigvee_{i=1}^{k}p_i(R)}(R)
+\bowtie_{\theta}
+\sigma_{\bigvee_{i=1}^{k}q_i(S)}(S)
+\right)
 \end{equation}
-Similarly, when multiple Common Table Expressions (CTEs) scan multiple years of data only for the outer \texttt{WHERE} clause to restrict all CTEs to a single target year, pushing the outer restriction $\sigma_{\text{year}=y}$ directly into each CTE eliminates redundant scans.
+The per-relation disjunctions form a candidate superset, not an exact replacement for the original branch pairings: rows satisfying predicates from different branches may pass the prefilters. Retaining the full residual condition removes those false positives. The same principle permits an outer restriction, such as a target year, to be propagated into a CTE that scans a fact table, provided the transformation preserves the original semantics.
+
+\paragraph{Illustrative SQL.}
+Here the date and sales CTEs restrict each relation to values that occur in at least one branch. The \texttt{WHERE} clause then preserves the original branch-by-branch condition:
+\begin{lstlisting}[language=SQL, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
+WITH candidate_dates AS (
+    SELECT d_date_sk, d_year
+    FROM date_dim
+    WHERE d_year IN (2001, 2002)
+),
+candidate_sales AS (
+    SELECT ss_sold_date_sk, ss_sales_price, ss_quantity
+    FROM store_sales
+    WHERE ss_sales_price > 100 OR ss_quantity >= 10
+)
+SELECT d.d_year, COUNT(*) AS qualifying_sales
+FROM candidate_sales AS s
+JOIN candidate_dates AS d
+    ON d.d_date_sk = s.ss_sold_date_sk
+WHERE (d.d_year = 2001 AND s.ss_sales_price > 100)
+   OR (d.d_year = 2002 AND s.ss_quantity >= 10)
+GROUP BY d.d_year;
+\end{lstlisting}
+The CTE predicates are only safe because they retain every branch of the original condition; the final \texttt{WHERE} expression must not be weakened or omitted.
 
 \subsubsection{Physical Impact in MySQL}
-MySQL's cost-based optimiser does not automatically factor equijoins out of multi-table \texttt{OR} blocks, nor does it synthesise bounding-box pre-filters for the participating dimension and fact tables. Consequently, it evaluates the join across unfiltered base tables (e.g., scanning 23M rows of \texttt{store\_sales} against 1.92M rows of \texttt{customer\_demographics} at SF8) and applies the \texttt{OR} filter post-join. Extracting the bounding box of each table into an isolated CTE restricts dimension tables to a tiny fraction of their rows (e.g., 8.5\% of \texttt{customer\_demographics} in Query 13) and prunes out-of-range fact tuples immediately upon index lookup.
+Cross-table disjunctions can make it difficult for an optimiser to identify selective access paths or apply every table-local condition before joining. Explicit candidate filters may reduce rows entering the join, while the residual predicate preserves the original logic; whether MySQL uses those filters early or chooses index access must be verified in the execution plan. In our Query 13 measurements, the SF8 baseline runtime was 715.51\,s, but the SF8 execution trees were not collected. This timing therefore documents the observed scaling problem, not a particular physical cause. The available SF1 baseline tree shows a scan of 50,000 \texttt{customer\_address} rows followed by 13,837 address-driven lookups into \texttt{store\_sales}, with the 2001 date condition applied later in the join sequence.
 
 \subsection{Law III: Join Associativity, CTE Materialisation (\texttt{NO\_MERGE}), and Composite PK/FK Driving Order}
 
 \subsubsection{Theoretical Foundation}
-By the commutativity and associativity of inner joins, $(F_1 \bowtie F_2) \bowtie \sigma_p(D) \equiv (\sigma_p(D) \bowtie F_1) \bowtie F_2$. While all join trees produce identical relational results, the intermediate cardinalities vary by orders of magnitude depending on whether selective dimension filters $\sigma_p(D)$ are evaluated prior to fact-to-fact joins ($F_1 \bowtie F_2$).
+For inner joins with the same join predicates, associativity permits alternative join trees:
+\begin{equation}
+(R \bowtie_{\theta_1} S) \bowtie_{\theta_2} T
+\;\equiv\;
+R \bowtie_{\theta_1} (S \bowtie_{\theta_2} T)
+\end{equation}
+Here, $\theta_1$ and $\theta_2$ denote the same join predicates in both trees. Although these equivalent join trees return the same relational result, they may produce different intermediate cardinalities and access costs. Applying a selective dimension restriction before joining large fact relations can be advantageous when it reduces the input substantially. The equivalence does not extend indiscriminately across outer joins or other operators whose semantics depend on evaluation order.
+
+\paragraph{Illustrative SQL.}
+The example filters the date dimension before joining it to store sales. The hint discourages merging the eligible CTE, while \texttt{STRAIGHT\_JOIN} expresses the intended left-to-right join order:
+\begin{lstlisting}[language=SQL, basicstyle=\ttfamily\scriptsize, breaklines=true, frame=single]
+WITH filtered_dates AS (
+    SELECT d_date_sk
+    FROM date_dim
+    WHERE d_year = 2001
+)
+SELECT /*+ NO_MERGE(filtered_dates) */
+       COUNT(*) AS sale_rows
+FROM filtered_dates AS d
+STRAIGHT_JOIN store_sales AS s
+    ON s.ss_sold_date_sk = d.d_date_sk;
+\end{lstlisting}
+The hint and join construct shape aspects of planning; they do not guarantee that a particular index will be used or that the resulting plan will be faster.
 
 \subsubsection{Physical Impact in MySQL}
-Two physical mechanics in MySQL 8.0 InnoDB govern how join trees scale from SF1 to SF8:
+MySQL's cost-based optimiser estimates row counts and costs when selecting join orders and access paths. Two mechanisms can be considered when those choices are demonstrably poor:
 \begin{enumerate}
-    \item \textbf{Defeating \texttt{derived\_merge} via \texttt{NO\_MERGE()}:} By default, MySQL's \texttt{derived\_merge} optimiser flag dissolves non-aggregated CTEs and derived tables back into the outer query's flat join graph. At SF8, cardinality misestimations across 6--10 tables frequently cause the optimiser to abandon selective dimension filters and initiate a nested-loop join from an unselective table or fact table, creating multi-billion-row intermediate explosions. Adding the \texttt{/*+ NO\_MERGE() */} optimiser hint (or a \texttt{GROUP BY}) inside a filtered CTE forces MySQL to materialise the small filtered result set into an in-memory temporary table first.
-    \item \textbf{Driving into InnoDB Clustered Composite Primary Keys and Foreign Key B-Trees:} In InnoDB, every table is physically clustered around its \texttt{PRIMARY KEY}, and every foreign key constraint creates a secondary B-Tree index. In TPC-DS, fact tables have composite primary keys such as \texttt{inventory(inv\_date\_sk, inv\_item\_sk, inv\_warehouse\_sk)} or \texttt{store\_sales(ss\_item\_sk, ss\_ticket\_number)}, as well as foreign key indexes on date surrogate keys (e.g., \texttt{cs\_sold\_date\_sk}, \texttt{ss\_sold\_date\_sk}). By combining materialised selective dimension CTEs with \texttt{STRAIGHT\_JOIN}, we force MySQL to drive the execution plan from the small filtered dimension CTE directly into the fact table's Foreign Key index or left-prefix Composite Primary Key, converting 94-million-row full table scans into $O(\log N)$ B-Tree point lookups.
+    \item \textbf{CTE and derived-table materialisation:} MySQL may merge an eligible query block into its outer query or materialise it as an intermediate result. The \texttt{NO\_MERGE} hint can discourage merging for eligible CTEs or derived tables, which may be useful when a selective result should remain a separate input. Materialisation also incurs computation and storage costs, and the hint does not prescribe the outer join order.
+    \item \textbf{Join-order and index access:} \texttt{STRAIGHT\_JOIN} constrains join order and can make a small filtered relation the intended driving input. In InnoDB, rows are organized by the clustered primary key, while secondary indexes provide additional access paths. A suitable index whose leading columns match the join predicates can support selective lookups into a fact table; a foreign-key constraint alone does not guarantee that every desired access path is efficient. Index lookups may be less attractive when they retrieve a large fraction of the table.
 \end{enumerate}
+Accordingly, materialisation, join-order control, and index selection should be evaluated together using \texttt{EXPLAIN} or \texttt{EXPLAIN ANALYZE} and measurements at the relevant scale factors. Statistics, selectivity, intermediate-result size, and index definitions can change which plan is preferable.
+
+\subsection{Summary of Optimization Laws}
+\begingroup
+\small
+\begin{longtable}{@{}p{0.22\textwidth}p{0.28\textwidth}p{0.45\textwidth}@{}}
+\toprule
+\textbf{Law} & \textbf{Mechanism} & \textbf{Concise explanation} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Law} & \textbf{Mechanism} & \textbf{Concise explanation} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Law I: Distributive Aggregate Pushdown & 1. Early Aggregation & Aggregate fact-table rows before joining to reduce the volume of intermediate data. \\
+ & 2. Surrogate-Key Grouping & Group by compact integer keys (\texttt{*_sk}) instead of wide descriptive attributes such as names and addresses. \\
+ & 3. Distributive Aggregate Decomposition & Compute partial aggregates (\texttt{SUM}, \texttt{COUNT}) before the join and combine them afterward to preserve the final result. \\
+ & 4. Functional-Dependency Preservation & Exploit the dependency from a unique dimension key to its descriptive attributes to defer retrieving those attributes until after aggregation. \\
+\addlinespace
+Law II: Selection Pushdown and Disjunctive Bounding-Box Extraction & 5. Selection Pushdown & Apply filters directly to their source tables before joining to reduce the number of candidate rows. \\
+ & 6. Disjunctive Bounding-Box Extraction & Extract table-local predicates from cross-table \texttt{OR} conditions to construct safe, broader pre-filters for each relation. \\
+ & 7. Residual Predicate Evaluation & Reapply the original \texttt{OR} condition after joining to eliminate false-positive matches retained by the broader filters. \\
+ & 8. CTE Filter Propagation & Push outer restrictions, such as a target year, into underlying CTEs to avoid scanning irrelevant data. \\
+\addlinespace
+Law III: Join Associativity, CTE Materialisation, and Composite PK/FK Driving Order & 9. Join Reordering & Reorder associative and commutative inner joins to evaluate selective relations before large fact-to-fact joins. \\
+ & 10. CTE Materialisation (\texttt{NO\_MERGE}) & Discourage eligible CTEs or derived tables from being merged into the outer query, preserving a separate intermediate result when beneficial. \\
+ & 11. Join-Order Enforcement (\texttt{STRAIGHT\_JOIN}) & Control join order so that a chosen, selective relation drives subsequent joins. \\
+ & 12. Index-Driven Join Access & Use suitable foreign-key indexes or composite-index leftmost prefixes to retrieve matching fact rows instead of scanning entire tables. \\
+ & 13. Composite-Key Access Optimization & Align join predicates with the column order of composite primary keys to exploit efficient indexed lookups. \\
+\end{longtable}
+\endgroup
 
 \chapter{Implementation}
 
