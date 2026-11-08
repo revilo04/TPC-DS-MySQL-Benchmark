@@ -60,6 +60,9 @@ Esteban Zimányi
   \vspace{1cm}
 \end{titlepage}
 
+\tableofcontents
+\clearpage
+
 \chapter*{Abstract}
 
 This report evaluates the TPC-DS benchmark on MySQL 8 across scale factors 1, 2, 4, and 8 to investigate the performance characteristics of large analytical workloads and to assess the effectiveness of query optimisation for selected decision-support queries. TPC-DS is a realistic benchmark of a multi-channel retail data warehouse whose star and snowflake schema present substantial challenges in aggregation, join ordering, predicate selectivity, and index utilisation. Using controlled warm-cache measurements, the study compares a historical baseline with a set of optimised queries drawn from the most performance-critical classes of the workload, particularly the Group A, B, and C query families. The analysis identifies three recurring optimisation principles: early aggregation to reduce fact-table cardinality, early filtering to eliminate irrelevant rows, and deliberate join ordering combined with materialisation and index-driven access to control intermediate-row growth. These strategies are applied to the benchmark bottlenecks most affected by MySQL's cost-based execution plans, with emphasis on year-pivot reporting, fact-to-fact joins, and date-driven lookups. The results demonstrate substantial gains for the optimised subset of queries: cumulative runtime improves from 397.8 seconds to 160.3 seconds at scale factor 1 and from 14,818.9 seconds to 1,681.2 seconds at scale factor 8, corresponding to overall speedups of 2.5× and 8.8× respectively. The findings show that semantic-aware query rewriting can materially improve MySQL’s performance on representative TPC-DS workloads, while also highlighting the importance of execution-plan control, workload-specific optimisation, and the preservation of query semantics in analytical database systems.
