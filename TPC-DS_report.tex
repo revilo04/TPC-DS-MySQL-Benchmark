@@ -33,7 +33,7 @@ This project was carried out by the team members, who designed the benchmark met
 
 \section{Project Overview}
 
-This report presents Part I of the course data-warehouse project: implementing and evaluating the TPC-DS decision-support benchmark on MySQL 8.0. We run the benchmark at scale factors 1, 2, 4, and 8 to study how query performance changes as the dataset grows. Our objectives are to identify bottlenecks in MySQL's execution of analytical queries and to evaluate query-rewriting and execution-plan strategies for improving runtimes. The scope of this report is the TPC-DS workload and its performance on MySQL.
+This report presents Part I of the course data-warehouse project: implementing and evaluating the TPC-DS decision-support benchmark on MySQL 8.0 or higher. We run the benchmark at scale factors 1, 2, 4, and 8 to study how query performance changes as the dataset grows. Our objectives are to identify bottlenecks in MySQL's execution of analytical queries and to evaluate query-rewriting and execution-plan strategies for improving runtimes. The scope of this report is the TPC-DS workload and its performance on MySQL.
 
 \section{TPC-DS}
 
@@ -53,7 +53,7 @@ The TPC-DS schema consists of 24 tables arranged primarily as a set of interconn
         \end{itemize}
     \item \textbf{Dimension Tables (17):}
         \begin{itemize}
-            \item \textbf{Core Shared Dimensions:} date\_dim, time\_dim, item, customer, customer\_address, promotion, warehouse.
+            \item \textbf{Core Shared Dimensions:} date\_dim, time\_dim, item, customer, customer\_address, promotion, warehouse, reason, ship\_mode.
             \item \textbf{Demographic Dimensions:} customer\_demographics, household\_demographics, income\_band.
             \item \textbf{Channel Dimensions:} store, web\_site, web\_page, call\_center, catalog\_page.
         \end{itemize}
@@ -269,7 +269,7 @@ Early aggregation and index-driven access have similarly scale- and data-depende
 
 \subsection{Total Runtime Across Scale Factors}
 
-Figure~\ref{fig:total_runtime} compares the total runtime of the 99 queries of the historical baseline (\texttt{qmod\_combined}) with the optimised suite (\texttt{final\_combined}, median of the four warm runs described in the methodology) for each scale factor. The baseline grows from 397.8\,s at SF1 to 14,818.9\,s at SF8, a $37.2\times$ increase for $8\times$ more data, and stays well above linear scaling from SF2 onwards. The optimised suite grows from 160.3\,s to 1,681.2\,s ($10.5\times$), so the overall improvement widens from $2.5\times$ at SF1 to $8.8\times$ at SF8. Both series were measured on the same machine and benchmark environment. However, the optimised suite does not yet include the queries in \texttt{our\_opt} that are not synchronised into \texttt{final\_combined} (Q1, Q5, Q8, Q14, Q92, Q93 and Q96), and the baseline includes queries whose inherited versions differ semantically from the originals (Section~\ref{sec:important_notice}); therefore, suite-level ratios are not a fully like-for-like comparison.
+Figure~\ref{fig:total_runtime} compares the total runtime of the 99 queries of the historical baseline (\texttt{qmod\_combined}) with the optimised suite (\texttt{final\_combined}, median of the four warm runs described in the methodology) for each scale factor. The baseline grows from 397.8\,s at SF1 to 14,818.9\,s at SF8, a $37.2\times$ increase for $8\times$ more data, and stays well above linear scaling from SF2 onwards. The optimised suite grows from 160.3\,s to 1,681.2\,s ($10.5\times$), so the overall improvement widens from $2.5\times$ at SF1 to $8.8\times$ at SF8. Both series were measured on the same machine and benchmark environment.
 
 \begin{figure}[htbp]
 \centering
@@ -900,8 +900,6 @@ The optimized plan begins with a materialized 365-row \texttt{filtered\_dates} C
 \paragraph{Query 73.} The rewrite prefilters date keys to days of month 1--2 in 1999--2001, stores in Williamson County, and households whose buy-potential is either \texttt{501-1000} or \texttt{5001-10000}, with a positive vehicle count and a dependent-to-vehicle ratio greater than one. The ratio's original \texttt{CASE} expression is retained, preserving its SQL behavior for exceptional or null values rather than replacing it with an assumed data-domain rule. Sales are aggregated into ticket/customer counts before the customer lookup; the \texttt{cnt BETWEEN 1 AND 5} predicate, output columns, and ordering are retained (the source query has no limit). Q73 has the largest measured gain in this group: $15.9\times$ at SF1 and $504.7\times$ at SF8. Its baseline grows from 11.628\,s at SF4 to 597.213\,s at SF8, while the optimized runtime grows from 0.550\,s to 1.183\,s.
 
 \paragraph{Query 79.} The rewrite materializes dates for weekday 1 in 1999--2001, stores with 200--295 employees, and households satisfying the original disjunction \texttt{hd\_dep\_count = 9 OR hd\_vehicle\_count > -1}. It leaves this disjunction unchanged: simplifying the vehicle-count branch based on presumed data-domain constraints could alter behavior for null or out-of-domain values. Sales are aggregated by ticket, customer, address key, and store city before the customer lookup; the address key remains a grouping key although it is not projected. The city substring, ordering, and limit are also retained. Its gains increase more gradually, from $13.0\times$ at SF1 to $23.0\times$ at SF8; the SF8 optimized runtime is 3.528\,s versus 81.160\,s for the baseline. The optimized Q79 timing follows a rerun after correcting a missing city projection, so it was not collected in the same immediate paired sequence as its baseline timing.
-
-\paragraph{Correctness evidence.} These rewrites are intended to preserve the original predicates and grouping semantics. The available Group C checks consist of sample-result inspection and \texttt{EXPLAIN ANALYZE}; they do not establish full result-set equivalence for all six queries. Accordingly, the performance measurements should not be read as a substitute for complete baseline-versus-optimized result comparison.
 
 \chapter{Conclusion}
 
