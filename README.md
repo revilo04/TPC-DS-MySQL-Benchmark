@@ -1,135 +1,189 @@
-# TPC-DS Benchmarking with MySQL and Python
+# TPC-DS MySQL Benchmark
 
-This project demonstrates the implementation of TPC-DS benchmarking on a MySQL database using Python scripts to automate the process. The primary goal is to evaluate the performance and scalability of the MySQL database under different conditions, as defined by the TPC-DS benchmark.
+This repository benchmarks two 99-query TPC-DS suites against MySQL at a
+selected scale factor (SF) of 1, 2, 4, or 8:
 
-## Getting Started
+- **Baseline:** `queries/qmod_combined/`
+- **Optimized:** `queries/final_combined/`
 
-These instructions will help you set up and run the project on your local machine for development and testing purposes.
+The root-level `RUN_ME.sh` script handles one scale factor per run. It starts
+the repository's Docker Compose MySQL service when needed, generates and
+preprocesses that SF's dataset if missing, loads its MySQL database if missing,
+runs both query suites once, and writes timings and a comparison graph.
+Complete datasets and databases are reused, so rerunning for an already set up
+SF proceeds directly to benchmarking.
 
-### Prerequisites
+## Requirements
 
-- Python 3.9
-- MySQL Server
-- TPC-DS Toolkit
-- A bash-based command line tool to execute the bash scripts
+- Windows 10/11 with Docker Desktop configured for Linux containers, or another
+  host with Docker Compose v2 and Docker.
+- Python 3.9 or newer.
+- Network access on the first generator run so Docker can download its Linux
+  build image and C compiler packages.
+- Substantial free disk space for generated files and their MySQL copies. In
+  this checkout, the SF1/SF2/SF4/SF8 source CSVs alone occupy about 16.8 GiB;
+  MySQL tables and indexes need additional space. Dataset generation also uses
+  temporary staging space, and SF8 is the largest. Check available disk space
+  before starting.
+- Enough memory for MySQL to load and query the largest scale factor. Query
+  runtimes depend on the machine and can be long.
 
-### Installation
+The TPC-DS generator sources are bundled in
+`DSGen-software-code-4.0.0/`; no separate toolkit download or host C compiler is
+required.
 
-1. Clone the repository:
-```bash
-git clone https://github.com/QasimKhan5x/TPC-DS-MySQL
-```
-2. Navigate to the project directory:
-```bash
-cd TPC-DS-MySQL
-```
-3. Install the requisite python packages:
-```bash
-pip install -r requirements.txt
-```
+## Install Python dependencies
 
-### Executing the benchmark
+Run these commands from the repository root in PowerShell:
 
-1. First, generate data for scale factor 1 using the `tools/dsdgen` program. You first need to compile it. It can be done on a Linux distribution using
-```bash
-cd tools
-make
-```
-For Windows, use Visual Studio to open the `.sln` file and build the project.
-
-2. Create a folder called `../data/1` and `../data-maintenance/1`. The data for SF=1 will go here. These folders should exist outside of the root folder. So, if you are in `tools`, you should make the directories two levels up from the current directory instead.
-3. After building it, execute `./dsdgen` to build the data. Precise instructions regarding all the arguments are given in Section 3.3 of our report.
-4. Remove empty values in each file by executing the following script:
-```bash
-bash scripts/null_values.sh 1
-```
-This means you give the bash script permission to act as an executable and then preprocess the data in `../data/1`
-
-5. Create four folders in `../data-maintenance/1` called `1`, `2`, `3`, and `4`. The refresh data for each run of the data maintenance will go there.
-6. Create the refresh data from `tools` using `./dsdgen`. The command to generate the data is given in Section 3.8. of our report.
-7. Preprocess the generated refresh data for each set of refresh data using the following:
-```bash
-bash scripts/null_values_dm.sh 1 <n> # execute for n=1,2,3,4
-```
-8. `mkdir results` from the root directory. The results will go there.
-9. After applying the local configuration below and preparing query streams and refresh data, run the full benchmark:
-```bash
-python -m scripts.main
-```
-Text files will be generated in the `results` folder containing the results for each test.
-
-Note: you don't need to create the queries as we included them in our repository. However, for other scale factors, you will have to consult our report to generate queries for the power test and throughput test. 
-
-
-
----
-
-## Attribution & Acknowledgments
-This repository is based on the initial TPC-DS MySQL setup by [isakovaad](https://github.com/isakovaad/TPC-DS-MySQL), adapted and extended with Scale Factor scaling (SF 1, 2, 4, 8), automated query patches, temporary memory engine fixes, and custom query optimizations.
-
-
-## Query Directory Structure (`queries/`)
-All scale factors (`SF1`, `SF2`, `SF4`, `SF8`) execute against a single, standardized, flat query structure:
-- **`queries/orig/`**: Raw, unmodified TPC-DS query templates generated by the official toolkit (`dsqgen`).
-- **`queries/qmod/`**: Syntax-corrected baseline queries adapted for MySQL compatibility (including interval and column patches).
-- **`queries/prev_student_opt/`**: The subset of queries optimized by the previous student group (queries 1, 4, 5, 6, 11, 39, 72, 78, 99).
-- **`queries/qmod_combined/`**: Full 99-query suite combining `qmod` with the previous student's optimizations (this is the folder we ran the original benchmark on).
-- **`queries/our_opt/`**: Our custom-optimized queries.
-- **`queries/final_combined/`**: The production hybrid suite used for benchmarking (automatically layers our optimizations over the baseline and previous student rewrites).
-
-## Local development configuration
-
-Run Python modules from the repository root with `.venv` activated. The standard
-load, power, throughput, and maintenance drivers share `scripts/config.py`.
-Defaults are `127.0.0.1:3306`, user `root`, and an empty password, matching a fresh
-local Homebrew installation. Override using `TPCDS_MYSQL_HOST`,
-`TPCDS_MYSQL_PORT`, `TPCDS_MYSQL_USER`, and `TPCDS_MYSQL_PASSWORD`; do not commit
-passwords. SF1 uses database `tpcds`; other scales use `tpcds<sf>`.
-
-The server must have `local_infile=ON` for imports. An administrator can enable
-it across restarts with `SET PERSIST local_infile = ON;`. Only the load and
-maintenance drivers enable local-file imports on the client.
-
-After generating data, preprocess it using:
-
-```bash
-bash scripts/null_values.sh 1
-# For refresh set 1, when generated:
-bash scripts/null_values_dm.sh 1 1
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-These macOS/Linux-compatible wrappers use `.venv/bin/python` (override with
-`TPCDS_PYTHON`). They preserve `.dat` originals and produce pipe-delimited `.csv`
-files, removing the generator's trailing record delimiter and mapping empty
-fields to MySQL `\N`. Existing `.csv` files are normalized in place; repeated
-runs produce the same content. Both copies consume disk space.
+If PowerShell prevents environment activation, either use
+`.\.venv\Scripts\python.exe` directly or allow locally installed scripts to run
+according to your organization's PowerShell policy.
 
-Once SF1 is loaded, run the baseline with:
+## Run the workflow
 
-```bash
-python -m scripts.power_test --sf 1
-# Or select the complete optimized suite:
-python -m scripts.power_test --sf 1 --opt
-# Smoke-test single queries with a warm-up run and a per-statement limit:
-python -m scripts.power_test --sf 1 --query 3 --query 39 --warmup --timeout 600
+Run from the repository root using Bash (including Git Bash or WSL on Windows):
+
+```powershell
+bash RUN_ME.sh
 ```
 
-`--warmup` executes each statement once untimed before the timed run.
-`--timeout` sets MySQL `max_execution_time` for the session; it is disabled by
-default because long queries at larger scale factors can legitimately exceed
-any fixed limit. Each run writes `results/pt_sf=<sf>_<uid>.txt` (one line per
-query, `nan` for a failed query), `_meta.json` (settings, query file hashes,
-Git commit, MySQL variables, server uptime, versions and hardware) and, when a
-query fails or times out, `_failures.txt`. Any failure makes the command exit
-non-zero after saving results; do not use such runs as complete timings.
+No scale factor argument defaults to SF1. To select a different scale:
 
-`--qdir` accepts an exact SQL directory, defaulting to
-`queries/qmod_combined/`; `--opt` selects `queries/final_combined/` when no
-explicit directory is given. The full `scripts.main` workflow additionally
-requires generated query streams (`--streams_dir`) and refresh datasets;
-it is not the initial local smoke test. The loader drops and recreates its
-target database. The legacy MySQL Shell alternative `load_test2.py` and
-standalone `drop_fk.py` are not part of this configured workflow.
+```powershell
+bash RUN_ME.sh 1
+bash RUN_ME.sh 2
+bash RUN_ME.sh 4
+bash RUN_ME.sh 8
+```
 
-Run configuration/preprocessing checks without a database:
-`python -m unittest discover -s tests -v`.
+For the selected SF, the script:
+
+1. Connects to the configured MySQL server, or starts the `mysql` Compose
+   service if no MySQL server is reachable.
+2. Reuses complete preprocessed CSVs in `data/<sf>/`. If any expected table
+   file is absent, it builds the bundled `dsdgen` inside Docker, generates
+   that SF's data, and preprocesses it for MySQL. The generator is included in
+   this repository; no external dataset download is needed. Docker downloads
+   its build image and compiler packages if they are not already available.
+3. Creates and loads the matching database (`tpcds` for SF1, or `tpcds<sf>`
+   for SF2/SF4/SF8) only if it is missing.
+4. Executes the baseline suite once and optimized suite once at the selected
+   SF.
+5. Appends per-query timings and statuses to the results CSV and saves one
+   baseline-versus-optimized graph for that SF.
+
+Invalid scale factors are rejected. The database loader recreates its target
+database, so an existing but incomplete database causes the script to stop
+unless `--force` is provided. To deliberately reload only the selected SF:
+
+```powershell
+bash RUN_ME.sh 4 --force
+```
+
+`--force` permits dropping and recreating the selected benchmark database. It
+still reuses complete generated data. Use it only with disposable benchmark
+databases.
+
+## Rerun and other modes
+
+When the selected database contains the expected TPC-DS tables and rows, the
+normal command skips setup, data generation, and loading, then runs that SF's
+benchmark again. If MySQL is stopped, the normal command attempts to start the
+Compose service so it can connect to the existing data volume.
+
+To run only against an already-running MySQL server and fail instead of trying
+to start or set up anything:
+
+```powershell
+bash RUN_ME.sh 2 --benchmark-only
+```
+
+To prepare missing data and databases without running queries:
+
+```powershell
+bash RUN_ME.sh 8 --setup-only
+```
+
+`--benchmark-only` does not start Docker, generate data, or load the database.
+It fails with an explanation if MySQL or the selected loaded database is
+unavailable. `--benchmark-only` and `--setup-only` cannot be used together;
+`--force` cannot be combined with `--benchmark-only`.
+
+## MySQL connection settings
+
+The Compose service listens on `127.0.0.1:3306`. Its local development root
+password defaults to `1234`, matching the Python connection configuration.
+Set connection overrides in PowerShell before starting the workflow:
+
+```powershell
+$env:TPCDS_MYSQL_HOST = "127.0.0.1"
+$env:TPCDS_MYSQL_PORT = "3306"
+$env:TPCDS_MYSQL_USER = "root"
+$env:TPCDS_MYSQL_PASSWORD = "your-local-password"
+bash RUN_ME.sh 1
+```
+
+Compose applies the root password when it initializes a new data volume. For an
+already-initialized volume, changing the environment variable does not change
+the MySQL account password; set it to the password already configured in that
+volume. Do not use the example local defaults outside a disposable development
+environment or commit personal credentials.
+
+## Results
+
+Each invocation uses a unique UTC run ID. Results are saved under `results/`:
+
+- `query_comparison.csv` — appended, one row per query and scale factor, with
+  baseline and optimized seconds, success/failure status, error messages, and
+  run ID. Failed queries have an empty timing and a recorded error.
+- `query_comparison_sf=<sf>_<run-id>.png` — grouped per-query comparison graph
+  for the selected SF.
+- `load_test_sf=<sf>_<run-id>.txt` — loader timing details for databases loaded
+  during setup.
+
+An execution error is recorded in the CSV and graph; after the benchmark
+finishes, the script exits with a non-zero status if any query failed. Resolve
+the reported database/query issue before treating that run as complete.
+
+## Repository layout
+
+- `RUN_ME.sh` — root entry point; accepts one optional scale factor (default 1).
+- `scripts/run_benchmark.py` — setup, loading, benchmarking, and results
+  workflow invoked by `RUN_ME.sh`.
+- `scripts/power_test.py` — shared SQL reading and query timing functions.
+- `scripts/load_test.py` — MySQL schema creation, data loading, indexes, and
+  table analysis.
+- `scripts/preprocess_data.py` — converts generated pipe-delimited files for
+  MySQL `LOAD DATA LOCAL INFILE`.
+- `tools/` — MySQL TPC-DS table and referential-integrity definitions.
+- `DSGen-software-code-4.0.0/` — bundled TPC-DS generator sources and
+  specifications.
+- `queries/qmod_combined/` and `queries/final_combined/` — baseline and
+  optimized query suites.
+- `data/<sf>/` — generated/preprocessed source data for each scale factor.
+- `results/` — benchmark CSV, graphs, and loader logs.
+
+## Tests
+
+Run the local tests without a live MySQL server:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+## Attribution and licensing
+
+This repository builds on the TPC-DS MySQL setup by
+[isakovaad](https://github.com/isakovaad/TPC-DS-MySQL), with subsequent
+scale-factor, MySQL compatibility, and query-optimization changes. TPC-DS
+materials and the bundled generator are subject to the included `EULA.txt` and
+license notices. Review those terms before redistributing toolkit materials or
+benchmark results.

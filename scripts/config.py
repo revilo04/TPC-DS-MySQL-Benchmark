@@ -18,7 +18,7 @@ def mysql_config(sf=None, *, local_infile=False):
         "host": os.getenv("TPCDS_MYSQL_HOST", "127.0.0.1"),
         "port": int(os.getenv("TPCDS_MYSQL_PORT", "3306")),
         "user": os.getenv("TPCDS_MYSQL_USER", "root"),
-        "password": os.getenv("TPCDS_MYSQL_PASSWORD", ""),
+        "password": os.getenv("TPCDS_MYSQL_PASSWORD", "1234"),
         "consume_results": True,
         "allow_local_infile": local_infile,
     }

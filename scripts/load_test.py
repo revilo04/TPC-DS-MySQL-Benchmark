@@ -8,7 +8,7 @@ from datetime import datetime
 import mysql.connector
 from mysql.connector import pooling
 
-from scripts.config import database_name, mysql_config
+from scripts.config import ROOT, database_name, mysql_config
 from scripts.utils import log_time, reset_pool
 
 
@@ -49,10 +49,13 @@ def load_data_into_table(cnxpool, csv_file):
 
 
 def load_test(sf: int, uid: str):
-    csv_files = glob.glob(f"../data/{sf}/*.csv")
+    data_directory = ROOT / "data" / str(sf)
+    csv_files = glob.glob(str(data_directory / "*.csv"))
     if not csv_files:
-        raise FileNotFoundError(f"No preprocessed CSV files in ../data/{sf}; database unchanged")
-    log_file = f"results/load_test_sf={sf}_{uid}.txt"
+        raise FileNotFoundError(f"No preprocessed CSV files in {data_directory}; database unchanged")
+    results_directory = ROOT / "results"
+    results_directory.mkdir(exist_ok=True)
+    log_file = str(results_directory / f"load_test_sf={sf}_{uid}.txt")
     # Initialize connection
     conn = mysql.connector.connect(
         **mysql_config(), use_pure=True
@@ -71,7 +74,7 @@ def load_test(sf: int, uid: str):
     cursor.execute("SET sql_log_bin=0;")
 
     # 2. Table Creation
-    with open("tools/tpcds.sql", "r") as f:
+    with (ROOT / "tools" / "tpcds.sql").open("r", encoding="utf-8") as f:
         table_creation_sql = f.read()
     initial_time = time.time()
     for statement in table_creation_sql.split(";"):
@@ -108,7 +111,7 @@ def load_test(sf: int, uid: str):
 
     print("Adding foreign keys and indexes...", flush=True)
     # 4. Referential Integrity
-    with open("tools/tpcds_ri.sql", "r") as f:
+    with (ROOT / "tools" / "tpcds_ri.sql").open("r", encoding="utf-8") as f:
         tpcds_ri_sql = f.read().strip()
     start_time = time.time()
     for statement in tpcds_ri_sql.split(";"):

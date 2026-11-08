@@ -154,6 +154,12 @@ def main(args):
     baseline = {sf: load_baseline(os.path.join(ROOT, BASELINE_FILE.format(sf=sf))) for sf in SCALE_FACTORS}
     optimized = load_optimized(os.path.join(ROOT, OPTIMIZED_CSV))
 
+    if args.only_highlight:
+        paths = [plot_highlight(baseline, optimized, q, out_dir) for q in (args.highlight or [21])]
+        for path in paths:
+            print(os.path.relpath(path, ROOT))
+        return
+
     path, base_totals, opt_totals = plot_total_runtime(baseline, optimized, out_dir)
     paths = [path] + [plot_query_times(baseline, optimized, sf, out_dir) for sf in SCALE_FACTORS]
     paths += [plot_highlight(baseline, optimized, q, out_dir) for q in (args.highlight or [21])]
@@ -168,4 +174,6 @@ if __name__ == "__main__":
     parser.add_argument("--out", default="report", help="Output directory. Default is report/")
     parser.add_argument("--highlight", type=int, action="append", default=None,
                         help="Query to plot across scale factors; repeat for several. Default is 21")
+    parser.add_argument("--only-highlight", action="store_true",
+                        help="Generate only the requested highlight figure(s)")
     main(parser.parse_args())
