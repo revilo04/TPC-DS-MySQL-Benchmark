@@ -132,7 +132,7 @@ Set connection overrides in PowerShell before starting the workflow:
 $env:TPCDS_MYSQL_HOST = "127.0.0.1"
 $env:TPCDS_MYSQL_PORT = "3306"
 $env:TPCDS_MYSQL_USER = "root"
-$env:TPCDS_MYSQL_PASSWORD = "your-local-password"
+$env:TPCDS_MYSQL_PASSWORD = "1234"
 bash RUN_ME.sh 1
 ```
 
