@@ -18,6 +18,11 @@ SF proceeds directly to benchmarking.
 - Windows 10/11 with Docker Desktop configured for Linux containers, or another
   host with Docker Compose v2 and Docker.
 - Python 3.9 or newer.
+- TPC-DS Toolkit 4.0.0, downloaded separately from the official TPC source and
+  used in accordance with its EULA. Extract it into the repository root so the
+  path `DSGen-software-code-4.0.0/tools/Makefile.suite` exists. If the archive
+  extracts to a differently named folder, rename or move it to
+  `DSGen-software-code-4.0.0`.
 - Network access on the first generator run so Docker can download its Linux
   build image and C compiler packages.
 - Substantial free disk space for generated files and their MySQL copies. In
@@ -28,9 +33,9 @@ SF proceeds directly to benchmarking.
 - Enough memory for MySQL to load and query the largest scale factor. Query
   runtimes depend on the machine and can be long.
 
-The TPC-DS generator sources are bundled in
-`DSGen-software-code-4.0.0/`; no separate toolkit download or host C compiler is
-required.
+The benchmark does not redistribute the TPC-DS toolkit. Download and extract
+version 4.0.0 yourself as described above before running the workflow. The
+generator is built inside Docker, so a host C compiler is not required.
 
 ## Install Python dependencies
 
@@ -69,10 +74,10 @@ For the selected SF, the script:
 1. Connects to the configured MySQL server, or starts the `mysql` Compose
    service if no MySQL server is reachable.
 2. Reuses complete preprocessed CSVs in `data/<sf>/`. If any expected table
-   file is absent, it builds the bundled `dsdgen` inside Docker, generates
-   that SF's data, and preprocesses it for MySQL. The generator is included in
-   this repository; no external dataset download is needed. Docker downloads
-   its build image and compiler packages if they are not already available.
+   file is absent, it builds `dsdgen` from your extracted toolkit inside
+   Docker, generates that SF's data, and preprocesses it for MySQL. No external
+   dataset download is needed. Docker downloads its build image and compiler
+   packages if they are not already available.
 3. Creates and loads the matching database (`tpcds` for SF1, or `tpcds<sf>`
    for SF2/SF4/SF8) only if it is missing.
 4. Executes the baseline suite once and optimized suite once at the selected
@@ -164,8 +169,8 @@ the reported database/query issue before treating that run as complete.
 - `scripts/preprocess_data.py` — converts generated pipe-delimited files for
   MySQL `LOAD DATA LOCAL INFILE`.
 - `tools/` — MySQL TPC-DS table and referential-integrity definitions.
-- `DSGen-software-code-4.0.0/` — bundled TPC-DS generator sources and
-  specifications.
+- `DSGen-software-code-4.0.0/` — toolkit directory that you download and
+  extract locally; it is not included in this repository.
 - `queries/qmod_combined/` and `queries/final_combined/` — baseline and
   optimized query suites.
 - `data/<sf>/` — generated/preprocessed source data for each scale factor.
@@ -184,6 +189,7 @@ python -m unittest discover -s tests -v
 This repository builds on the TPC-DS MySQL setup by
 [isakovaad](https://github.com/isakovaad/TPC-DS-MySQL), with subsequent
 scale-factor, MySQL compatibility, and query-optimization changes. TPC-DS
-materials and the bundled generator are subject to the included `EULA.txt` and
-license notices. Review those terms before redistributing toolkit materials or
-benchmark results.
+toolkit materials are downloaded separately and remain subject to the toolkit's
+EULA and license notices. Review those terms before using or redistributing
+toolkit materials. Identify benchmark results as non-comparable to official
+TPC Benchmark Results unless specifically authorized by TPC.
