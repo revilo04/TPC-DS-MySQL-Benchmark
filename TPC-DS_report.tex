@@ -5,6 +5,7 @@
 \usepackage{listings}
 \usepackage{graphicx}
 \usepackage{longtable}
+\usepackage{url}
 \sceau{Pictures/sceauULB.jpg}
 
 \addbibresource{biblio.bib}
@@ -74,7 +75,7 @@ The TPC-DS schema consists of 24 tables arranged primarily as a set of interconn
 
 \section{MySQL}
 
-MySQL is a widely adopted relational database management system built around the ACID-compliant InnoDB storage engine. Traditionally engineered for Online Transaction Processing (OLTP) environments, MySQL relies on a cost-based optimizer (CBO) to evaluate execution paths for complex SQL statements. When applied to decision support workloads like TPC-DS, MySQL processes complex multi-table joins, subqueries, and advanced analytical features such as window functions and aggregate windowing operations introduced in modern SQL standards. Its foundational architecture utilizes row-level locking, clustered B-tree index structures, and Write-Ahead Logging (WAL) to maintain transactional integrity while executing multi-channel analytical queries.
+MySQL is a widely adopted relational database management system built around the ACID-compliant InnoDB storage engine. Traditionally engineered for Online Transaction Processing (OLTP) environments, MySQL relies on a cost-based optimizer (CBO) to evaluate execution paths for complex SQL statements. When applied to decision support workloads like TPC-DS, MySQL processes complex multi-table joins, subqueries, and advanced analytical features such as window functions and aggregate windowing operations introduced in modern SQL standards. Its foundational architecture utilizes row-level locking, clustered B-tree index structures, and Write-Ahead Logging (WAL) to maintain transactional integrity while executing multi-channel analytical queries. Further documentation is available at \url{https://dev.mysql.com/doc/refman/8.0/en/}.
 
 \section{Generalised Relational and Physical Optimization Framework}
 
