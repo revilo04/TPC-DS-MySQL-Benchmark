@@ -903,10 +903,6 @@ The optimized plan begins with a materialized 365-row \texttt{filtered\_dates} C
 
 \paragraph{Correctness evidence.} These rewrites are intended to preserve the original predicates and grouping semantics. The available Group C checks consist of sample-result inspection and \texttt{EXPLAIN ANALYZE}; they do not establish full result-set equivalence for all six queries. Accordingly, the performance measurements should not be read as a substitute for complete baseline-versus-optimized result comparison.
 
-\section{Other Optimisations}
-
-\textit{[TODO (Neha): optimisations of queries outside groups A, B and C.]}
-
 \chapter{Conclusion}
 
 \textit{[TODO (Neha): conclusion.]}
