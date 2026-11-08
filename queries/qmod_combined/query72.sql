@@ -14,8 +14,8 @@ join date_dim d3 on (cs_ship_date_sk = d3.d_date_sk and d3.d_date > d1.d_date + 
 left outer join promotion on (cs_promo_sk=p_promo_sk)
 where  
   d1.d_year = 2002
-  AND EXISTS (SELECT 1 FROM HOUSEHOLD_DEMOGRAPHICS JOIN catalog_sales ON CS_BILL_HDEMO_SK = HD_DEMO_SK WHERE HD_BUY_POTENTIAL = '>10000' LIMIT 1)
-  AND EXISTS (SELECT 1 FROM CUSTOMER_DEMOGRAPHICS join catalog_sales ON CS_BILL_CDEMO_SK = CD_DEMO_SK where CD_MARITAL_STATUS = 'U' LIMIT 1)
+  AND EXISTS (SELECT 1 FROM household_demographics JOIN catalog_sales ON CS_BILL_HDEMO_SK = HD_DEMO_SK WHERE HD_BUY_POTENTIAL = '>10000' LIMIT 1)
+  AND EXISTS (SELECT 1 FROM customer_demographics join catalog_sales ON CS_BILL_CDEMO_SK = CD_DEMO_SK where CD_MARITAL_STATUS = 'U' LIMIT 1)
 group by i_item_desc,w_warehouse_name,d1.d_week_seq
 order by total_cnt desc, i_item_desc, w_warehouse_name, d_week_seq
 limit 100;

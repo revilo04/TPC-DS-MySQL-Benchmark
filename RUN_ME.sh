@@ -7,7 +7,7 @@ scale_factor="${1:-1}"
 case "$scale_factor" in
     1|2|4|8) ;;
     *)
-        printf 'Usage: %s [1|2|4|8]\n' "$0" >&2
+        printf 'Usage: %s [1|2|4|8] [--setup-only | --benchmark-only] [--force]\n' "$0" >&2
         exit 2
         ;;
 esac

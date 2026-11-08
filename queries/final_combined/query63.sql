@@ -1,15 +1,3 @@
-/*
-  Optimization procedure:
-  1. Apply the exact 12-month date window and complete item category/class/
-     brand disjunction in filtered CTEs.
-  2. Drive from eligible item keys into store_sales, then use sold-date and
-     store keys to retain only matching rows.
-  3. Preserve manager/month grouping, the manager-partitioned window average,
-     outer deviation predicate, ordering, and limit.
-
-  All three item attributes remain correlated within each original OR branch;
-  they are not converted into independent lists that would admit extra items.
-*/
 -- Law II: Restrict the date and item candidates before sales aggregation.
 WITH filtered_dates AS (
     -- The source lists twelve consecutive month_seq values.

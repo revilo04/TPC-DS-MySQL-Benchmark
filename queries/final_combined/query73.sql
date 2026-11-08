@@ -1,15 +1,3 @@
-/*
-  Optimization procedure:
-  1. Materialize the exact date-of-month/year window, Williamson County store
-     subset, and household rows satisfying every original household filter.
-  2. Drive from the filtered dates into store_sales, then join only qualifying
-     stores and household demographics before ticket/customer aggregation.
-  3. Keep the household ratio CASE expression and grouping keys unchanged;
-     join customer only after ticket counts have been computed.
-
-  The repeated county value in the baseline IN list is equivalent to a single
-  equality predicate. The vehicle/dependent constraints are not simplified.
-*/
 -- Law II: Filter the exact date, county, and household domains first.
 WITH filtered_dates AS (
     -- Keep the baseline two-day-of-month and three-year date window.

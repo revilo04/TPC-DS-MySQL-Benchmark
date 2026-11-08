@@ -1,14 +1,3 @@
-/*
-  Optimization procedure:
-  1. Materialize the 2002 dates and each dimension's exact union of values
-     used by the original three demographic and three address branches.
-  2. Drive from those dates into store_sales and apply safe fact-side bounding
-     boxes (sales price 50..200 and net profit 0..25000).
-  3. Retain all branch-specific status/education/price and state/profit
-     correlations after joining. The bounds are supersets only; they do not
-     replace the original disjunctions.
-  4. Preserve the store join and the original SUM aggregate.
-*/
 -- Law II: Prefilter dimensions and apply the outer fact bounds before joins.
 WITH filtered_dates AS (
     -- Use the baseline year restriction before the fact-table join.

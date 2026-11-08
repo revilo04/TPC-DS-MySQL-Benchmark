@@ -1,5 +1,6 @@
 import csv
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,26 @@ class BenchmarkWorkflowTests(unittest.TestCase):
         tables = run_benchmark.expected_tables()
         self.assertEqual(len(tables), 25)
         self.assertEqual(len(set(tables)), len(tables))
+
+    def test_active_query_suites_use_case_correct_table_names(self):
+        uppercase_tables = re.compile(
+            r"\b(?:"
+            + "|".join(
+                map(
+                    re.escape,
+                    (table.upper() for table in run_benchmark.expected_tables()),
+                )
+            )
+            + r")\b"
+        )
+        for directory in (run_benchmark.BASELINE_QUERIES, run_benchmark.OPTIMIZED_QUERIES):
+            query_directory = run_benchmark.ROOT / directory
+            for query_file in query_directory.glob("*.sql"):
+                sql = re.sub(r"'(?:''|[^'])*'", "''", query_file.read_text(encoding="utf-8"))
+                self.assertIsNone(
+                    uppercase_tables.search(sql),
+                    f"{query_file.relative_to(run_benchmark.ROOT)} uses uppercase table names",
+                )
 
     def test_mysql_default_password_matches_compose(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -46,23 +67,44 @@ class BenchmarkWorkflowTests(unittest.TestCase):
 
     def test_database_state_checks_expected_rows(self):
         class Cursor:
-            def __init__(self):
-                self.fetchone_calls = 0
+            query = ""
 
-            def execute(self, *_):
-                pass
+            def execute(self, query, *_):
+                self.query = query
 
             def fetchone(self):
-                self.fetchone_calls += 1
-                return ("tpcds",) if self.fetchone_calls == 1 else (1,)
+                if "SCHEMATA" in self.query:
+                    return ("tpcds",)
+                if "TABLE_NAME = 'MV_INV'" in self.query:
+                    return ("MV_INV",)
+                return (1,)
 
             def fetchall(self):
+                if "REFERENTIAL_CONSTRAINTS" in self.query:
+                    return [(name,) for name in run_benchmark.expected_foreign_keys()]
                 return [("customer",), ("date_dim",)]
 
         self.assertEqual(
             run_benchmark.database_state(Cursor(), 1, ("customer", "date_dim")),
             (True, True, []),
         )
+
+    def test_incomplete_database_is_resumed_without_dropping(self):
+        connection = Mock()
+        states = {1: (True, False, ["tables empty: item"])}
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(run_benchmark, "connection_available", return_value=True))
+            stack.enter_context(patch.object(run_benchmark, "connect_mysql", return_value=connection))
+            stack.enter_context(patch.object(run_benchmark, "current_database_states", return_value=states))
+            stack.enter_context(patch.object(run_benchmark, "ensure_datasets"))
+            load = stack.enter_context(patch.object(run_benchmark, "load_test"))
+            run_benchmark.prepare_databases(
+                SimpleNamespace(benchmark_only=False, force=False, scale_factor=1),
+                ("customer",),
+                "run-1",
+            )
+        load.assert_called_once_with(1, "run-1", resume=True)
+        connection.close.assert_called_once()
 
     def test_complete_databases_skip_dataset_generation_and_loading(self):
         connection = Mock()
@@ -138,8 +180,11 @@ class BenchmarkWorkflowTests(unittest.TestCase):
     def test_scale_factor_plot_is_created(self):
         with tempfile.TemporaryDirectory() as temporary:
             graph = Path(temporary) / "comparison.png"
-            baseline = ({1: 1.0, 2: None}, {2: ("error", "timeout")})
-            optimized = ({1: 0.5, 2: 0.75}, {})
+            baseline = (
+                {1: 1.0, 2: None, 3: 0.01},
+                {2: ("error", "timeout")},
+            )
+            optimized = ({1: 0.5, 2: 0.75, 3: 200.0}, {})
             run_benchmark.plot_scale_factor(1, baseline, optimized, graph)
             self.assertTrue(graph.is_file())
             self.assertGreater(graph.stat().st_size, 0)

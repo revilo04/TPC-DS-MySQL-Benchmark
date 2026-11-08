@@ -1,15 +1,3 @@
-/*
-  Optimization procedure:
-  1. Materialize the exact three-year/week-day set and the two qualifying
-     dimension subsets. The repeated store-city values in the baseline reduce
-     to the same two-value IN set.
-  2. Start at the bounded dates and drive into store_sales, then probe store,
-     household_demographics, and customer_address by their keys.
-  3. Keep the inner ticket/customer/address/city grouping exactly as written:
-     ss_addr_sk is part of the grouping even though it is not projected.
-  4. Preserve the outer current-address-vs-bought-city inequality, ordering,
-     and limit.
-*/
 -- Law II: Filter date, city, and household candidates before fact access.
 WITH filtered_dates AS (
     -- Restrict to the exact weekday and three-year range in the baseline.

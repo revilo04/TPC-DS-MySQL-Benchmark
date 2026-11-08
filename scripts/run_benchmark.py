@@ -1,7 +1,6 @@
 """Prepare TPC-DS data and MySQL databases, then compare both query suites."""
 import argparse
 import csv
-import math
 import re
 import shutil
 import subprocess
@@ -54,6 +53,19 @@ def missing_dataset_tables(directory, tables):
     ]
 
 
+def expected_foreign_keys():
+    ri_sql = (ROOT / "tools" / "tpcds_ri.sql").read_text(encoding="utf-8")
+    ri_sql = "\n".join(
+        line for line in ri_sql.splitlines() if not line.lstrip().startswith("--")
+    )
+    return {
+        match.group(1).casefold()
+        for match in re.finditer(
+            r"\badd\s+constraint\s+`?([A-Za-z0-9_]+)", ri_sql, re.IGNORECASE
+        )
+    }
+
+
 def database_state(cursor, sf, tables):
     database = database_name(sf)
     cursor.execute(
@@ -80,6 +92,29 @@ def database_state(cursor, sf, tables):
             empty.append(table)
     if empty:
         return True, False, [f"tables empty: {', '.join(empty)}"]
+
+    cursor.execute(
+        "SELECT CONSTRAINT_NAME FROM information_schema.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = %s",
+        (database,),
+    )
+    constraints = {row[0].casefold() for row in cursor.fetchall()}
+    missing_constraints = sorted(expected_foreign_keys() - constraints)
+    if missing_constraints:
+        return True, False, [
+            f"foreign keys missing: {', '.join(missing_constraints)}"
+        ]
+
+    cursor.execute(
+        "SELECT TABLE_NAME FROM information_schema.TABLES "
+        "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'MV_INV'",
+        (database,),
+    )
+    if cursor.fetchone() is None:
+        return True, False, ["MV_INV missing"]
+    cursor.execute(f"SELECT 1 FROM `{database}`.`MV_INV` LIMIT 1")
+    if cursor.fetchone() is None:
+        return True, False, ["MV_INV is empty"]
     return True, True, []
 
 
@@ -152,7 +187,7 @@ def generate_datasets(scale_factors, tables, run_id):
             output_directory = f"/workspace/{stage.relative_to(ROOT).as_posix()}"
             container_commands.append(
                 f"./dsdgen -DIR {output_directory} -SCALE {sf} "
-                "-VERBOSE Y -SUFFIX .dat -TERMINATE N -RNGSEED 42"
+                "-VERBOSE Y -SUFFIX .dat -TERMINATE Y -RNGSEED 42"
             )
 
         command = [
@@ -188,6 +223,15 @@ def generate_datasets(scale_factors, tables, run_id):
 
 
 def ensure_datasets(scale_factors, tables, run_id):
+    for sf in scale_factors:
+        directory = ROOT / "data" / str(sf)
+        for table in tables:
+            raw_file = directory / f"{table}.dat"
+            csv_file = directory / f"{table}.csv"
+            source = raw_file if raw_file.is_file() else csv_file
+            if source.is_file():
+                preprocess_file(source)
+
     missing_by_sf = {
         sf: missing_dataset_tables(ROOT / "data" / str(sf), tables)
         for sf in scale_factors
@@ -246,9 +290,11 @@ def prepare_databases(args, tables, run_id):
         return
 
     if exists and not args.force:
-        raise RuntimeError(
-            f"{database_name(args.scale_factor)} exists but is incomplete "
-            f"({'; '.join(reasons)}). Use --force to drop and reload it."
+        print(
+            f"{database_name(args.scale_factor)} is incomplete "
+            f"({'; '.join(reasons)}); attempting a safe resume without dropping "
+            "already loaded tables.",
+            flush=True,
         )
 
     ensure_datasets([args.scale_factor], tables, run_id)
@@ -256,7 +302,7 @@ def prepare_databases(args, tables, run_id):
         f"Loading {database_name(args.scale_factor)} from data/{args.scale_factor}.",
         flush=True,
     )
-    load_test(args.scale_factor, run_id)
+    load_test(args.scale_factor, run_id, resume=exists and not args.force)
 
 
 def run_query_suite(sf, query_directory):
@@ -312,27 +358,88 @@ def append_results(rows):
 
 def plot_scale_factor(sf, baseline, optimized, output_path):
     queries = sorted(set(baseline[0]) | set(optimized[0]))
-    x_values = list(range(len(queries)))
-    width = 0.4
-    baseline_values = [
-        baseline[0].get(query) if baseline[0].get(query) is not None else math.nan
-        for query in queries
+    positions = list(range(len(queries)))
+    baseline_values = [baseline[0].get(query) for query in queries]
+    optimized_values = [optimized[0].get(query) for query in queries]
+    successful_values = [
+        value
+        for value in baseline_values + optimized_values
+        if value is not None
     ]
-    optimized_values = [
-        optimized[0].get(query) if optimized[0].get(query) is not None else math.nan
-        for query in queries
-    ]
+    use_log_scale = (
+        len(successful_values) > 1
+        and all(value > 0 for value in successful_values)
+        and max(successful_values) / min(successful_values) >= 100
+    )
 
-    figure, axis = plt.subplots(figsize=(18, 7))
-    axis.bar([x - width / 2 for x in x_values], baseline_values, width, label="Baseline")
-    axis.bar([x + width / 2 for x in x_values], optimized_values, width, label="Optimized")
+    figure_height = min(32, max(8, len(queries) * 0.28))
+    figure, axis = plt.subplots(figsize=(13, figure_height))
+    baseline_y = [position - 0.16 for position in positions]
+    optimized_y = [position + 0.16 for position in positions]
+    axis.scatter(
+        [
+            value for value in baseline_values
+            if value is not None and (value > 0 or not use_log_scale)
+        ],
+        [
+            y for value, y in zip(baseline_values, baseline_y)
+            if value is not None and (value > 0 or not use_log_scale)
+        ],
+        label="Baseline",
+        marker="o",
+        s=30,
+        color="#2878B5",
+        zorder=3,
+    )
+    axis.scatter(
+        [
+            value for value in optimized_values
+            if value is not None and (value > 0 or not use_log_scale)
+        ],
+        [
+            y for value, y in zip(optimized_values, optimized_y)
+            if value is not None and (value > 0 or not use_log_scale)
+        ],
+        label="Optimized",
+        marker="D",
+        s=28,
+        color="#E87500",
+        zorder=3,
+    )
+    for values, y_values in (
+        (baseline_values, baseline_y),
+        (optimized_values, optimized_y),
+    ):
+        for value, y in zip(values, y_values):
+            if value is None:
+                axis.text(
+                    0.01,
+                    y,
+                    "failed",
+                    transform=axis.get_yaxis_transform(),
+                    color="#B22222",
+                    fontsize=7,
+                    va="center",
+                )
+
     axis.set_title(f"TPC-DS Query Execution Times - SF{sf}")
-    axis.set_xlabel("Query")
-    axis.set_ylabel("Execution time (seconds)")
-    axis.set_xticks(x_values)
-    axis.set_xticklabels(queries, rotation=90, fontsize=7)
-    axis.legend()
-    axis.grid(axis="y", linestyle="--", alpha=0.35)
+    axis.set_xlabel(
+        "Execution time (seconds; logarithmic scale)"
+        if use_log_scale
+        else "Execution time (seconds)"
+    )
+    axis.set_ylabel("Query number")
+    axis.set_yticks(positions)
+    axis.set_yticklabels([str(query) for query in queries], fontsize=8)
+    axis.invert_yaxis()
+    if use_log_scale:
+        axis.set_xscale("log")
+        axis.set_xlim(min(successful_values) / 2, max(successful_values) * 2)
+    else:
+        maximum = max(successful_values, default=0)
+        axis.set_xlim(0, maximum * 1.15 if maximum else 1)
+    axis.legend(loc="lower right")
+    axis.grid(axis="x", linestyle="--", alpha=0.35)
     figure.tight_layout()
     figure.savefig(output_path, dpi=180)
     plt.close(figure)

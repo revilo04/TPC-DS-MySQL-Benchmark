@@ -1,5 +1,5 @@
-import glob
 import os
+import re
 import time
 from argparse import ArgumentParser
 from concurrent.futures import ThreadPoolExecutor
@@ -48,91 +48,141 @@ def load_data_into_table(cnxpool, csv_file):
     return elapsed_time
 
 
-def load_test(sf: int, uid: str):
+def verify_table_row_counts(conn, cursor, expected_rows):
+    conn.commit()
+    for table_name, row_count in expected_rows.items():
+        cursor.execute(f"SELECT COUNT(*) FROM `{table_name}`")
+        actual_rows = cursor.fetchone()[0]
+        if actual_rows != row_count:
+            raise RuntimeError(
+                f"Import verification failed for {table_name}: expected "
+                f"{row_count} rows, found {actual_rows}."
+            )
+
+
+def load_test(sf: int, uid: str, resume: bool = False):
     data_directory = ROOT / "data" / str(sf)
-    csv_files = glob.glob(str(data_directory / "*.csv"))
-    if not csv_files:
-        raise FileNotFoundError(f"No preprocessed CSV files in {data_directory}; database unchanged")
+    with (ROOT / "tools" / "tpcds.sql").open("r", encoding="utf-8") as schema_file:
+        table_creation_sql = schema_file.read()
+    table_statements = [
+        statement.strip()
+        for statement in table_creation_sql.split(";")
+        if statement.strip()
+    ]
+    tables = [
+        re.search(r"create\s+table\s+`?([A-Za-z0-9_]+)", statement, re.IGNORECASE).group(1)
+        for statement in table_statements
+    ]
+    csv_files = {path.stem.casefold(): path for path in data_directory.glob("*.csv")}
+    missing = [table for table in tables if table.casefold() not in csv_files]
+    if missing:
+        raise FileNotFoundError(
+            f"Missing preprocessed CSV files in {data_directory}: {', '.join(missing)}; "
+            "database unchanged"
+        )
     results_directory = ROOT / "results"
     results_directory.mkdir(exist_ok=True)
     log_file = str(results_directory / f"load_test_sf={sf}_{uid}.txt")
-    # Initialize connection
-    conn = mysql.connector.connect(
-        **mysql_config(), use_pure=True
-    )
+    conn = mysql.connector.connect(**mysql_config(), use_pure=True)
     cursor = conn.cursor()
-
-    # 1. Database Creation
     db = database_name(sf)
-    cursor.execute(f"DROP DATABASE IF EXISTS {db};")
-    cursor.execute(f"CREATE DATABASE {db};")
-    cursor.execute(f"USE {db};")
-    # turn off autocommit, unique_checks, foreign_key_checks, sql_log_bin
-    cursor.execute("SET autocommit=0;")
-    cursor.execute("SET unique_checks=0;")
-    cursor.execute("SET foreign_key_checks=0;")
-    cursor.execute("SET sql_log_bin=0;")
+    try:
+        if not resume:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{db}`;")
+        cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{db}`;")
+        cursor.execute(f"USE `{db}`;")
+        cursor.execute("SET autocommit=0;")
+        cursor.execute("SET unique_checks=0;")
+        cursor.execute("SET foreign_key_checks=0;")
+        cursor.execute("SET sql_log_bin=0;")
 
-    # 2. Table Creation
-    with (ROOT / "tools" / "tpcds.sql").open("r", encoding="utf-8") as f:
-        table_creation_sql = f.read()
-    initial_time = time.time()
-    for statement in table_creation_sql.split(";"):
-        stmt = statement.strip()
-        if stmt:
+        initial_time = time.time()
+        for statement in table_statements:
+            match = re.search(
+                r"create\s+table\s+`?([A-Za-z0-9_]+)", statement, re.IGNORECASE
+            )
+            table_name = match.group(1)
+            cursor.execute(
+                "SELECT 1 FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
+                (db, table_name),
+            )
+            if cursor.fetchone() is None:
+                cursor.execute(statement)
+        conn.commit()
+        log_time(log_file, "Table Creation", time.time() - initial_time)
+
+        expected_rows = {}
+        to_load = []
+        for table_name in tables:
+            csv_file = csv_files[table_name.casefold()]
+            with csv_file.open("rb") as source:
+                row_count = sum(1 for _ in source)
+            expected_rows[table_name] = row_count
+            cursor.execute(f"SELECT COUNT(*) FROM `{table_name}`")
+            existing_rows = cursor.fetchone()[0]
+            if existing_rows == row_count:
+                continue
+            if existing_rows != 0:
+                raise RuntimeError(
+                    f"Cannot safely resume {table_name}: database has {existing_rows} "
+                    f"rows but {csv_file.name} has {row_count}. The table was not changed."
+                )
+            to_load.append((table_name, csv_file))
+
+        if to_load:
+            dbconfig = dict(mysql_config(sf, local_infile=True), use_pure=True)
+            cnxpool = pooling.MySQLConnectionPool(
+                pool_name=f"insertion_{sf}_{uid[-8:]}",
+                pool_size=8,
+                **dbconfig,
+            )
+            csv_files_to_load = [
+                (cnxpool, os.path.abspath(str(csv_file)).replace("\\", "\\\\"))
+                for _, csv_file in to_load
+            ]
+            start_time = time.time()
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                results = list(executor.map(lambda args: load_data_into_table(*args), csv_files_to_load))
+            log_time(log_file, "Insertion", time.time() - start_time)
+            for _ in range(8):
+                reset_pool(cnxpool)
+
+        verify_table_row_counts(conn, cursor, expected_rows)
+
+        print("Adding missing foreign keys and indexes...", flush=True)
+        with (ROOT / "tools" / "tpcds_ri.sql").open("r", encoding="utf-8") as ri_file:
+            ri_statements = ri_file.read().split(";")
+        cursor.execute(
+            "SELECT CONSTRAINT_NAME FROM information_schema.REFERENTIAL_CONSTRAINTS "
+            "WHERE CONSTRAINT_SCHEMA = %s",
+            (db,),
+        )
+        existing_constraints = {row[0].casefold() for row in cursor.fetchall()}
+        start_time = time.time()
+        for statement in ri_statements:
+            stmt = "\n".join(
+                line for line in statement.splitlines() if not line.lstrip().startswith("--")
+            ).strip()
+            if not stmt:
+                continue
+            match = re.search(r"\badd\s+constraint\s+`?([A-Za-z0-9_]+)", stmt, re.IGNORECASE)
+            if match and match.group(1).casefold() in existing_constraints:
+                continue
             cursor.execute(stmt)
-    conn.commit()
-    table_creation_time = time.time() - initial_time
-    log_time(log_file, "Table Creation", table_creation_time)
-    # 3. Data insertion
-    # Initialize Connection Pool
-    dbconfig = dict(mysql_config(sf, local_infile=True), use_pure=True)
-    cnxpool = pooling.MySQLConnectionPool(
-        pool_name="insertion_pool", pool_size=8, **dbconfig
-    )
-    # Resolve file paths before passing them to MySQL.
-    csv_files = list(map(os.path.abspath, csv_files))
-    # replace \ with \\ for SQL
-    csv_files = list(map(lambda x: x.replace("\\", "\\\\"), csv_files))
-    start_time = time.time()
-    max_thread_time = 0
-    th_args = [(cnxpool, csv_file) for csv_file in csv_files]
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        results = executor.map(lambda p: load_data_into_table(*p), th_args)
-        for result in results:
-            if result > max_thread_time:
-                max_thread_time = result
-    elapsed_time = time.time() - start_time
-    print("max time for a table is", max_thread_time)
-    log_time(log_file, "Insertion", elapsed_time)
-    # Reset the connection settings for each connection in the pool
-    for _ in range(8):
-        reset_pool(cnxpool)
+            if match:
+                existing_constraints.add(match.group(1).casefold())
+        conn.commit()
+        log_time(log_file, "Referential Integrity", time.time() - start_time)
 
-    print("Adding foreign keys and indexes...", flush=True)
-    # 4. Referential Integrity
-    with (ROOT / "tools" / "tpcds_ri.sql").open("r", encoding="utf-8") as f:
-        tpcds_ri_sql = f.read().strip()
-    start_time = time.time()
-    for statement in tpcds_ri_sql.split(";"):
-        stmt = statement.strip()
-        if stmt:
-            cursor.execute(stmt)
-    conn.commit()
-    elapsed_time = time.time() - start_time
-    log_time(log_file, "Referential Integrity", elapsed_time)
+        print("Analyzing tables...", flush=True)
+        start_time = time.time()
+        for table_name in tables:
+            cursor.execute(f"ANALYZE TABLE `{table_name}`")
+        log_time(log_file, "Analyze Time", time.time() - start_time)
 
-    print("Analyzing tables...", flush=True)
-    # 5. Analyze Tables
-    start_time = time.time()
-    for csv_file in csv_files:
-        table_name = os.path.basename(csv_file)[:-4]
-        cursor.execute(f"ANALYZE TABLE {table_name};")
-    analyze_time = time.time() - start_time
-    log_time(log_file, "Analyze Time", analyze_time)
-
-    print("Building MV_INV inventory summary...", flush=True)
-    q39_ct = """CREATE TABLE MV_INV (
+        print("Building MV_INV inventory summary...", flush=True)
+        q39_ct = """CREATE TABLE IF NOT EXISTS MV_INV (
         W_WAREHOUSE_NAME varchar(20),
         W_WAREHOUSE_SK integer,
         I_ITEM_SK integer,
@@ -141,7 +191,7 @@ def load_test(sf: int, uid: str):
         STDEV float,
         MEAN float
     );"""
-    q39_data = """INSERT INTO MV_INV
+        q39_data = """INSERT INTO MV_INV
         SELECT
             W_WAREHOUSE_NAME,
             W_WAREHOUSE_SK,
@@ -150,28 +200,28 @@ def load_test(sf: int, uid: str):
             D_YEAR,
             STDDEV_SAMP(INV_QUANTITY_ON_HAND) AS STDEV,
             AVG(INV_QUANTITY_ON_HAND) AS MEAN
-        FROM DATE_DIM
-            JOIN INVENTORY ON INV_DATE_SK = D_DATE_SK
-            JOIN ITEM ON INV_ITEM_SK = I_ITEM_SK
-            JOIN WAREHOUSE ON INV_WAREHOUSE_SK = W_WAREHOUSE_SK
+        FROM date_dim
+            JOIN inventory ON INV_DATE_SK = D_DATE_SK
+            JOIN item ON INV_ITEM_SK = I_ITEM_SK
+            JOIN warehouse ON INV_WAREHOUSE_SK = W_WAREHOUSE_SK
         GROUP BY W_WAREHOUSE_NAME, W_WAREHOUSE_SK, I_ITEM_SK, D_MOY, D_YEAR;"""
-    start_time = time.time()
-    cursor.execute(q39_ct)
-    cursor.execute(q39_data)
-    elapsed_time = time.time() - start_time
-    log_time(log_file, "EADS", elapsed_time)
-    # finish
-    cursor.execute("SET autocommit=1;")
-    cursor.execute("SET unique_checks=1;")
-    cursor.execute("SET foreign_key_checks=1;")
-    cursor.execute("SET sql_log_bin=1;")
-    end_time = time.time()
-    total_time = end_time - initial_time
-    log_time(log_file, "Total", total_time)
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return total_time
+        start_time = time.time()
+        cursor.execute(q39_ct)
+        cursor.execute("TRUNCATE TABLE MV_INV")
+        cursor.execute(q39_data)
+        elapsed_time = time.time() - start_time
+        log_time(log_file, "EADS", elapsed_time)
+        cursor.execute("SET autocommit=1;")
+        cursor.execute("SET unique_checks=1;")
+        cursor.execute("SET foreign_key_checks=1;")
+        cursor.execute("SET sql_log_bin=1;")
+        total_time = time.time() - initial_time
+        log_time(log_file, "Total", total_time)
+        conn.commit()
+        return total_time
+    finally:
+        cursor.close()
+        conn.close()
 
 
 if __name__ == "__main__":

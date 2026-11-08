@@ -39,6 +39,28 @@ class LocalSetupTests(unittest.TestCase):
         self.assertEqual(normalize_line(b'|abc|||\r\n', True), b'\\N|abc|\\N|\\N\n')
         self.assertEqual(normalize_line(b'|abc|\n'), b'\\N|abc|\\N\n')
         self.assertEqual(normalize_line(b'1|x|\n', True), b'1|x\n')
+        self.assertEqual(normalize_line(b'1|x||\n', True), b'1|x|\\N\n')
+        self.assertEqual(
+            normalize_line(b'1|x||\n', True, expected_fields=3),
+            b'1|x|\\N\n',
+        )
+        self.assertEqual(
+            normalize_line(b'1|x\n', expected_fields=3),
+            b'1|x|\\N\n',
+        )
+        with self.assertRaises(ValueError):
+            normalize_line(b'1\n', expected_fields=3, final_field_nullable=False)
+
+    def test_preprocess_repairs_legacy_missing_final_null(self):
+        with tempfile.TemporaryDirectory() as directory:
+            csv_file = Path(directory) / "customer.csv"
+            csv_file.write_bytes(b"|".join([b"1"] * 17) + b"\n")
+            preprocess_file(csv_file)
+            self.assertEqual(
+                len(csv_file.read_bytes().strip().split(b"|")),
+                18,
+            )
+            self.assertTrue(csv_file.read_bytes().endswith(b"|\\N\n"))
 
     def test_preserves_raw_data_and_is_repeatable(self):
         with tempfile.TemporaryDirectory() as directory:

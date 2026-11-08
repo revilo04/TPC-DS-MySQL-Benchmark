@@ -1,16 +1,3 @@
-/*
-  Optimization procedure:
-  1. Materialize the exact weekday/year range, employee-count store subset,
-     and household rows satisfying the original OR condition.
-  2. Drive from the filtered dates into store_sales, then join qualifying
-     stores and household rows before calculating ticket totals.
-  3. Retain ss_addr_sk in the inner GROUP BY even though it is not projected;
-     keep the customer lookup after aggregation and preserve the city substring,
-     order, and limit.
-
-  The household OR is intentionally not simplified: hd_vehicle_count > -1
-  must keep its exact SQL behavior for NULL and all stored values.
-*/
 -- Law II: Push weekday/year, employee-count, and household filters downward.
 WITH filtered_dates AS (
     -- Keep the original weekday and inclusive three-year range.

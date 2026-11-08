@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
-from scripts.load_test import load_data_into_table
+from scripts.load_test import load_data_into_table, verify_table_row_counts
 
 
 class ImportWarningTests(unittest.TestCase):
@@ -18,6 +18,26 @@ class ImportWarningTests(unittest.TestCase):
         connection.commit.assert_not_called()
         cursor.close.assert_called_once()
         connection.close.assert_called_once()
+
+    def test_import_verification_commits_before_reading_counts(self):
+        events = []
+
+        class Connection:
+            def commit(self):
+                events.append("commit")
+
+        class Cursor:
+            def execute(self, query):
+                events.append(query)
+
+            def fetchone(self):
+                return (5,)
+
+        verify_table_row_counts(Connection(), Cursor(), {"warehouse": 5})
+        self.assertEqual(
+            events,
+            ["commit", "SELECT COUNT(*) FROM `warehouse`"],
+        )
 
 
 if __name__ == '__main__':

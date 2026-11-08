@@ -223,10 +223,10 @@ def data_maintenance(cursor, all_files: list[str], log_file: str):
             D_YEAR,
             STDDEV_SAMP(INV_QUANTITY_ON_HAND) AS STDEV,
             AVG(INV_QUANTITY_ON_HAND) AS MEAN
-        FROM DATE_DIM
-            JOIN INVENTORY ON INV_DATE_SK = D_DATE_SK
-            JOIN ITEM ON INV_ITEM_SK = I_ITEM_SK
-            JOIN WAREHOUSE ON INV_WAREHOUSE_SK = W_WAREHOUSE_SK
+        FROM date_dim
+            JOIN inventory ON INV_DATE_SK = D_DATE_SK
+            JOIN item ON INV_ITEM_SK = I_ITEM_SK
+            JOIN warehouse ON INV_WAREHOUSE_SK = W_WAREHOUSE_SK
         GROUP BY W_WAREHOUSE_NAME, W_WAREHOUSE_SK, I_ITEM_SK, D_MOY, D_YEAR;"""
     start_time = time.time()
     run_query(cursor, q39_delete)
